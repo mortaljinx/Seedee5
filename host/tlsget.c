@@ -519,10 +519,33 @@ done:
     return status;
 }
 
+/* Certificates are not checked (see the top of this file), so a redirect could otherwise send the app anywhere,
+ * including to devices on the home network. It may stay on the same site, or go to the sites the app's downloads
+ * really move between; port 443 only. */
+static int host_ends(const char *host, const char *domain)
+{
+    const size_t h = strlen(host), d = strlen(domain);
+    return h == d ? !strcasecmp(host, domain) : h > d && host[h - d - 1] == '.' && !strcasecmp(host + h - d, domain);
+}
+
+static int redirect_ok(const char *host, int port, const char *first_host)
+{
+    static const char *const sites[] = {"wikipedia.org", "wikimedia.org", "githubusercontent.com", "github.com",
+                                        "libretro.com"};
+    if (!strcasecmp(host, first_host))
+        return 1;
+    if (port != 443)
+        return 0;
+    for (size_t i = 0; i < sizeof sites / sizeof sites[0]; i++)
+        if (host_ends(host, sites[i]))
+            return 1;
+    return 0;
+}
+
 int tls_https_get(const char *url, tls_resolve_fn resolve, volatile int *quit, int timeout_ms,
                   unsigned char **body, size_t *len, char *why, size_t why_len)
 {
-    char cur[1400], host[300], path[1100], loc[1100];
+    char cur[1400], host[300], path[1100], loc[1100], first_host[300] = "";
     long deadline = now_ms() + timeout_ms;
     *body = NULL;
     *len = 0;
@@ -533,6 +556,12 @@ int tls_https_get(const char *url, tls_resolve_fn resolve, volatile int *quit, i
             snprintf(why, why_len, "unsupported URL");
             return -1;
         }
+        if (hop > 0 && !redirect_ok(host, port, first_host)) {
+            snprintf(why, why_len, "redirected to another site (%.80s), not followed", host);
+            return -1;
+        }
+        if (hop == 0)
+            snprintf(first_host, sizeof first_host, "%s", host);
         int st = get_once(host, port, path, resolve, quit, deadline, body, len, loc, sizeof loc, why, why_len);
         if ((st == 301 || st == 302 || st == 303 || st == 307 || st == 308) && loc[0]) {
             if (loc[0] == '/') {

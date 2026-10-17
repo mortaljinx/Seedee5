@@ -89,13 +89,27 @@ def main():
 
     # this project's source
     src = out / f"Seedee5-{a.version}-source.tar.gz"
-    with tarfile.open(src, "w:gz") as t:
+    # Exactly the files git tracks (what the repository publishes), so nothing local gets in: test builds, libraries,
+    # logs and the like carry this machine's paths. Without git, the folders below minus anything built.
+    try:
+        tracked = subprocess.run(["git", "-C", str(CDI), "ls-files", "-z"], check=True, capture_output=True).stdout
+        files = [f for f in tracked.decode().split("\0") if f]
+    except (OSError, subprocess.CalledProcessError):
+        files = []
+    built = (".o", ".a", ".so", ".elf", ".self", ".bin", ".log", ".state", ".zip", ".tar.gz")
+    if not files:
+        print("   (not a git repository: the source archive is made from the folders, without built files)")
         for part in SOURCE_PARTS:
             p = CDI / part
-            if p.exists():
-                t.add(p, arcname=f"Seedee5-{a.version}/{part}",
-                      filter=lambda ti: None if "__pycache__" in ti.name or ti.name.endswith(".o") else ti)
-    print(f"==> {src.name}")
+            for f in ([p] if p.is_file() else sorted(p.rglob("*")) if p.is_dir() else []):
+                rel = f.relative_to(CDI).as_posix()
+                if f.is_file() and "__pycache__" not in rel and "/build/" not in f"/{rel}" and not rel.endswith(built):
+                    files.append(rel)
+    with tarfile.open(src, "w:gz") as t:
+        for rel in files:
+            if (CDI / rel).is_file():
+                t.add(CDI / rel, arcname=f"Seedee5-{a.version}/{rel}")
+    print(f"==> {src.name}: {len(files)} files")
 
     # the core and libnfs as built (their own licences ask for it)
     if a.with_core_source:

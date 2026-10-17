@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Seedee5: a release that anyone can install, for GitHub and the homebrew stores.
 
-    python3 scripts/make_release.py /mnt/data/ps5stack/PS5_CDiWheel 1.0 [--with-core-source]
+    python3 scripts/make_release.py ~/ps5/Seedee5 1.0 [--with-core-source]
 
 Run from this project's folder after ps5/tools/build.sh. Writes dist/release-seedee5-<version>/ in the title's folder:
 

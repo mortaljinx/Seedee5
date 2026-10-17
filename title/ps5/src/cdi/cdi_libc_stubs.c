@@ -1,7 +1,7 @@
 /*
  * Seedee5 - libc names the title defines itself (console build only): the ones with no service behind them.
  *
- * The link recipe on this machine makes these names local to the title (/mnt/data/ps5stack/title-local.map, made
+ * The link recipe on this machine makes these names local to the title (title-local.map in the folder the titles are built in, made
  * for Jellyfin Wheel), so a title has to define them: the linker refuses a version script naming a symbol that
  * is not there. They are also what a title needs anyway:
  *   - getaddrinfo / freeaddrinfo for numeric IPv4 addresses: the console's own fails a title even for those, and

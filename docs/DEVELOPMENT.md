@@ -618,20 +618,21 @@ tools/cdie_sdl.c is its desktop test program (`make cdie_sdl`).
 
 ### Making and building it (on the laptop, next to Jellyfin Wheel)
 
-The template, PS5_Vulkan, PS5_PayloadSDK and PS5_VKHomebrewUI must be in /mnt/data/ps5stack, as for Jellyfin Wheel.
+The template, PS5_Vulkan, PS5_PayloadSDK and PS5_VKHomebrewUI go in one folder, here ~/ps5 (any folder works), with the title beside the
+template (~/ps5/Seedee5 next to ~/ps5/PS5_VulkanTemplate).
 
-    export PATH=/mnt/data/ps5stack/venv/bin:$PATH
-    export CCACHE_DIR=/mnt/data/ps5stack/ccache
+    export PATH=~/ps5/venv/bin:$PATH
+    export CCACHE_DIR=~/ps5/ccache
     unset PS5_VULKAN_DIR PS5_PAYLOAD_SDK
     cd ~/Documents/ps5-cdi
-    python3 title/make_cdi_title.py /mnt/data/ps5stack/PS5_CDiWheel          # once: makes the title
-    scripts/build_title_libs.sh /mnt/data/ps5stack/PS5_CDiWheel              # the core and libraries (long the first time)
-    cd /mnt/data/ps5stack/PS5_CDiWheel
+    python3 title/make_cdi_title.py ~/ps5/Seedee5          # once: makes the title
+    scripts/build_title_libs.sh ~/ps5/Seedee5              # the core and libraries (long the first time)
+    cd ~/ps5/Seedee5
     ps5/tools/build.sh && ps5/tools/deploy.sh --all
 
 Wait about 45 seconds after the first deploy before launching (the console has to notice the new title folder),
-then start "CD-i Wheel" from the home screen. Watch klog with `nc <console-ip> 3232 | tee ~/klog-cdi-1.txt`.
-After a new ps5-cdi version: `python3 title/make_cdi_title.py /mnt/data/ps5stack/PS5_CDiWheel --update`, then
+then start Seedee5 from the home screen. Watch klog with `nc <console-ip> 3232 | tee ~/klog-cdi-1.txt`.
+After a new ps5-cdi version: `python3 title/make_cdi_title.py ~/ps5/Seedee5 --update`, then
 scripts/build_title_libs.sh again only if the core or the patches changed, then build.sh and deploy.sh.
 
 build_title_libs.sh builds the core in its own tree (third_party/same_cdi_title) with the title's SDK, which is not
@@ -660,7 +661,7 @@ CD-i Wheel now sets itself up for whoever installs it; nobody needs to write nfs
 * Limits: NAS means NFS (v3 or v4); SMB/Windows shares are not supported. USB drives cannot be used by a
   native title (it cannot see /mnt), so games go in /data or on a NAS.
 
-Update an existing title: `python3 title/make_cdi_title.py /mnt/data/ps5stack/PS5_CDiWheel --update`, then
+Update an existing title: `python3 title/make_cdi_title.py ~/ps5/Seedee5 --update`, then
 `ps5/tools/build.sh` and `ps5/tools/deploy.sh --all` as before (no library rebuild is needed if v41+ libs
 were built, but the engine changed, which the title build compiles itself).
 
@@ -762,7 +763,7 @@ was the first game's for both before, and each game's own after.
 
 The title needs its core rebuilt once (only one file recompiles):
 
-    cd ~/Documents/ps5-cdi && scripts/build_title_libs.sh /mnt/data/ps5stack/PS5_CDiWheel
+    cd ~/Documents/ps5-cdi && scripts/build_title_libs.sh ~/ps5/Seedee5
 
 ## Picture filters (v55)
 

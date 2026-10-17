@@ -77,14 +77,14 @@ controls, is in [INSTALL.txt](title/INSTALL.txt), which also comes in the releas
 Seedee5 is built on the PS5 Vulkan Template and its PS5 SDK, on Linux:
 
 ```sh
+# the title is made beside the template: ~/ps5/PS5_VulkanTemplate and ~/ps5/Seedee5 (any folder works)
+python3 title/make_cdi_title.py ~/ps5/Seedee5            # first time
+python3 title/make_cdi_title.py ~/ps5/Seedee5 --update   # after pulling changes
 # the CD-i core, libnfs, BearSSL and the 7z reader, built with the title's SDK
-scripts/build_title_libs.sh /path/to/PS5_CDiWheel
-# make (or refresh) the title on the template, then build it
-python3 title/make_cdi_title.py /path/to/PS5_CDiWheel            # first time
-python3 title/make_cdi_title.py /path/to/PS5_CDiWheel --update   # after pulling changes
-cd /path/to/PS5_CDiWheel && ps5/tools/build.sh
+scripts/build_title_libs.sh ~/ps5/Seedee5
+cd ~/ps5/Seedee5 && ps5/tools/build.sh
 # the release zip, source archives, notices and checksums
-python3 scripts/make_release.py /path/to/PS5_CDiWheel 1.20 --with-core-source
+python3 scripts/make_release.py ~/ps5/Seedee5 1.20 --with-core-source
 ```
 
 `make` in this folder builds the desktop versions (`cdihost`, and `cdie_sdl`, the same engine with SDL) for testing

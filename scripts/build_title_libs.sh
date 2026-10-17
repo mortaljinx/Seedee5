@@ -7,7 +7,7 @@
 #   liblzma7z.a     the LZMA SDK's 7z reader (public domain), behind host/arc7z.c
 #   libnfs.a        libnfs (LGPL-2.1+) at the pinned commit with our patch, and its headers in include/ (the NAS)
 #
-#   scripts/build_title_libs.sh /mnt/data/ps5stack/PS5_CDiWheel       for the console
+#   scripts/build_title_libs.sh ~/ps5/Seedee5       for the console
 #   scripts/build_title_libs.sh --host                               for the PC (the title's host reference build)
 #
 # The payload build (platform/ps5) keeps its own libraries: the title's SDK is a different one (the platform

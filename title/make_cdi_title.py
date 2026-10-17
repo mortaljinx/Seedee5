@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """ps5-cdi: make (or update) Seedee5, the native PS5 title, on the PS5 Vulkan Template.
 
-    python3 title/make_cdi_title.py /mnt/data/ps5stack/PS5_CDiWheel
-    python3 title/make_cdi_title.py /mnt/data/ps5stack/PS5_CDiWheel --update   (after a new ps5-cdi version)
+    python3 title/make_cdi_title.py ~/ps5/Seedee5
+    python3 title/make_cdi_title.py ~/ps5/Seedee5 --update   (after a new ps5-cdi version)
 
 Run from the ps5-cdi folder. The first form makes the title with the template's own generator
 (ps5/tools/new-title.py --ui carousel, title id PPSA99142, 60 Hz), then puts Seedee5's files in:

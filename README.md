@@ -1,5 +1,18 @@
 <p align="center"><img src="docs/seedee5-logo-256.png" width="160" alt="Seedee5"></p>
 
+<p align="center">
+  <a href="https://github.com/mortaljinx/Seedee5/releases/latest"><img src="https://img.shields.io/github/v/release/mortaljinx/Seedee5?label=release&color=2ea043" alt="Latest release"></a>
+  <a href="https://github.com/mortaljinx/Seedee5/releases"><img src="https://img.shields.io/github/downloads/mortaljinx/Seedee5/total?color=1f6feb" alt="Downloads"></a>
+  <a href="https://homebrew.page/app/PPSA99142/"><img src="https://img.shields.io/badge/homebrew.page-PPSA99142-8957e5" alt="On the PS5 homebrew store"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/mortaljinx/Seedee5?color=blue" alt="Licence: GPL-3.0"></a>
+  <br>
+  <img src="https://img.shields.io/badge/platform-PS5-003791" alt="Platform: PS5">
+  <img src="https://img.shields.io/badge/tested%20on-firmware%204.03-555555" alt="Tested on firmware 4.03">
+  <img src="https://img.shields.io/badge/emulates-Philips%20CD--i-c8102e" alt="Emulates the Philips CD-i">
+  <img src="https://img.shields.io/badge/core-SAME__CDI%20(MAME)-6e7681" alt="Core: SAME_CDI (MAME)">
+  <img src="https://img.shields.io/badge/graphics-Vulkan%204K-a40e26" alt="Vulkan, 4K output">
+</p>
+
 # Seedee5
 
 **A Philips CD-i emulator for the PS5.** Seedee5 runs the SAME_CDI core (MAME's CD-i emulation) as a native PS5

@@ -1,0 +1,42 @@
+diff --git a/src/osd/libretro/libretro-internal/libretro.cpp b/src/osd/libretro/libretro-internal/libretro.cpp
+index 47ae491..aa65e69 100644
+--- a/src/osd/libretro/libretro-internal/libretro.cpp
++++ b/src/osd/libretro/libretro-internal/libretro.cpp
+@@ -937,6 +937,37 @@ bool retro_load_game(const struct retro_game_info *info)
+     return true;
+ }
+ 
++/* ps5-cdi: write the NVRAM (saved games, player memory) to disk on demand.
++ *
++ * MAME only writes it when the machine shuts down, so an app that is simply
++ * closed would lose it. running_machine::nvram_save() is private, so it is
++ * reached with the standard "explicit template instantiation" access trick,
++ * which keeps the exact behaviour (and file names) of the shutdown save and
++ * means machine.h, and therefore the whole core, does not need rebuilding. */
++template <typename Tag, typename Tag::type Member>
++struct ps5cdi_member_access
++{
++   friend typename Tag::type ps5cdi_get_member(Tag) { return Member; }
++};
++
++struct ps5cdi_nvram_save_tag
++{
++   typedef void (running_machine::*type)();
++   friend type ps5cdi_get_member(ps5cdi_nvram_save_tag);
++};
++
++template struct ps5cdi_member_access<ps5cdi_nvram_save_tag, &running_machine::nvram_save>;
++
++extern "C" RETRO_API void retro_flush_nvram(void)
++{
++   if (mame_machine_manager::instance() == NULL ||
++         mame_machine_manager::instance()->machine() == NULL)
++      return;
++
++   running_machine &machine = *mame_machine_manager::instance()->machine();
++   (machine.*ps5cdi_get_member(ps5cdi_nvram_save_tag()))();
++}
++
+ void retro_unload_game(void)
+ {
+    disk_control::clear();

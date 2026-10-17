@@ -1,0 +1,463 @@
+// Seedee5 - the picture filters (one compute shader, the mode in the push constants).
+//
+// The emulator's frame is in `src` (sampled, linear, clamp to edge); the part shown (the crop) is p.rect, in texels
+// of a p.texSize texture. Output pixels are written to `dst` at their own coordinates, 0..p.outSize.
+//
+//   1 SHARP      sharp bilinear: crisp pixels, no shimmer (each texel is a block, its edges anti-aliased)
+//   2 SMOOTH     Catmull-Rom bicubic
+//   3 SCANLINES  the picture's own lines, with dark gaps between them
+//   4 CRT        a TV, in linear light: scanline beams that widen with brightness, PAL-like colour bleed along the
+//                lines, an aperture-grille mask (one phosphor stripe a screen pixel: at 4K, 1280 triads across),
+//                the glow of bright parts (halation), a gently curved screen with rounded corners, a vignette
+//  16 FMV UP     (FMV clean-up, pass 3) the halo-free bicubic for video, crisp anti-aliased texels for text and
+//                drawn graphics (told apart by their edges: all the local contrast in a one-texel step)
+//  15 NL-MEANS   (FMV clean-up, pass 1, at source size) non-local means: each pixel the weighted mean of the pixels
+//                within 5 texels whose 5x5 neighbourhood has the same brightness pattern. MPEG's blocks and ringing
+//                average away; edges and texture, which only match themselves, stay. Colour, which MPEG keeps at
+//                half size in 16x16 blocks, is averaged over a wider tolerance. p.strength: 0 light, 1 strong
+//  10 DENOISE    (Enhanced, pass 1, at source size) an edge-preserving smoothing of low-contrast steps: the
+//                8x8 blocks and the ringing of MPEG video, while real edges stay
+//  13 SHARPEN    (Enhanced, pass 2, at source size) contrast-adaptive sharpening, as AMD's FidelityFX CAS / RCAS:
+//                strong where contrast is low, gentle on edges that are already sharp. At the source's size, where
+//                there is detail to sharpen (after a 4x upscale the neighbouring pixels are nearly the same)
+//  12 UPSCALE    (Enhanced, pass 3) Catmull-Rom clamped to the 2x2 texels around it (no halos)
+//  20 PREPARE    (first, for every mode) the part shown, copied to the top left of a working image, one texel per
+//                picture pixel: a 384-pixel CD-i picture comes in a 768-wide frame, each pixel twice; taken
+//                once, the filters see the real pixels (Sharp's blocks, Pixel art's diagonals, the scanlines)
+//  11 SHARPEN    the same sharpening at the output's size (Enhanced, pass 3, after EASU, as FSR 1 does)
+//  14 EASU       (Enhanced, pass 2) an edge-adaptive upscale after AMD's FidelityFX Super Resolution 1 "EASU": the
+//                direction and strength of the edge around each output pixel steer a stretched, rotated
+//                Lanczos-like kernel over the 12 nearest texels, clamped to the 2x2 around it (no halos)
+//   5 PIXEL ART  xBR-style corner rounding: where two diagonal neighbours make an edge, the corner of the texel
+//                is cut along it (sharp pixels elsewhere), anti-aliased to the output's pixels
+//
+// Compile: glslangValidator -V --target-env vulkan1.0 picture.comp --vn cdi_picture_spv -o picture_spv.h
+// SPDX-License-Identifier: GPL-3.0-or-later
+#version 450
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(binding = 0) uniform sampler2D src;
+layout(binding = 1, rgba8) uniform writeonly image2D dst;
+
+layout(push_constant) uniform Params {
+	vec4 rect;      // x, y, w, h of the part shown, texels
+	vec2 texSize;   // the source texture's size
+	vec2 outSize;   // the output's size, pixels
+	int mode;
+	int lines;      // the picture's scanlines (CRT, scanlines)
+	float strength; // 0..1, the mode's own amount
+	int dbl;        // PREPARE: bit 0, every texel is two columns wide; bit 1, every line is two rows tall
+} p;
+
+vec3 fetch(ivec2 t)
+{
+	const ivec2 lo = ivec2(p.rect.xy);
+	const ivec2 hi = ivec2(p.rect.xy + p.rect.zw) - 1;
+	return texelFetch(src, clamp(t, lo, hi), 0).rgb;
+}
+
+// a texel position kept inside the part shown (no neighbours from outside the crop)
+vec2 inside(vec2 t)
+{
+	return clamp(t, p.rect.xy + 0.5, p.rect.xy + p.rect.zw - 0.5);
+}
+
+vec3 bilinear(vec2 t)
+{
+	return textureLod(src, inside(t) / p.texSize, 0.0).rgb;
+}
+
+// Catmull-Rom in nine bilinear taps ("Bicubic filtering in fewer taps")
+vec3 catmull(vec2 t)
+{
+	const vec2 t1 = floor(t - 0.5) + 0.5;
+	const vec2 f = t - t1;
+	const vec2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f));
+	const vec2 w1 = 1.0 + f * f * (-2.5 + 1.5 * f);
+	const vec2 w2 = f * (0.5 + f * (2.0 - 1.5 * f));
+	const vec2 w3 = f * f * (-0.5 + 0.5 * f);
+	const vec2 w12 = w1 + w2;
+	const vec2 t0 = inside(t1 - 1.0) / p.texSize;
+	const vec2 t3 = inside(t1 + 2.0) / p.texSize;
+	const vec2 t12 = inside(t1 + w2 / w12) / p.texSize;
+	vec3 c = vec3(0.0);
+	c += textureLod(src, vec2(t0.x, t0.y), 0.0).rgb * w0.x * w0.y;
+	c += textureLod(src, vec2(t12.x, t0.y), 0.0).rgb * w12.x * w0.y;
+	c += textureLod(src, vec2(t3.x, t0.y), 0.0).rgb * w3.x * w0.y;
+	c += textureLod(src, vec2(t0.x, t12.y), 0.0).rgb * w0.x * w12.y;
+	c += textureLod(src, vec2(t12.x, t12.y), 0.0).rgb * w12.x * w12.y;
+	c += textureLod(src, vec2(t3.x, t12.y), 0.0).rgb * w3.x * w12.y;
+	c += textureLod(src, vec2(t0.x, t3.y), 0.0).rgb * w0.x * w3.y;
+	c += textureLod(src, vec2(t12.x, t3.y), 0.0).rgb * w12.x * w3.y;
+	c += textureLod(src, vec2(t3.x, t3.y), 0.0).rgb * w3.x * w3.y;
+	return c;
+}
+
+float luma(vec3 c)
+{
+	return dot(c, vec3(0.299, 0.587, 0.114));
+}
+
+vec3 sharpBilinear(vec2 t, vec2 scale)
+{
+	const vec2 a = t - 0.5;
+	const vec2 i = floor(a);
+	vec2 f = a - i;
+	f = clamp((f - 0.5) * scale + 0.5, 0.0, 1.0);
+	return bilinear(i + f + 0.5);
+}
+
+// One scanline's colour: the line's own row, smooth along it
+vec3 lineColour(float line, float lineH, vec2 t, vec2 scale)
+{
+	const float y = p.rect.y + (line + 0.5) * lineH;
+	const vec2 a = vec2(t.x - 0.5, y - 0.5);
+	const float i = floor(a.x);
+	float f = a.x - i;
+	f = clamp((f - 0.5) * min(scale.x, 2.0) + 0.5, 0.0, 1.0); // a little softer than sharp along the line
+	return bilinear(vec2(i + f + 0.5, y));
+}
+
+// The line's colour with its chroma softened along the line (brightness as it is): PAL's colour bleed
+vec3 bleed(float line, float lineH, vec2 t, vec2 scale)
+{
+	const vec3 c = lineColour(line, lineH, t, scale);
+	const vec3 s = (lineColour(line, lineH, t - vec2(0.7, 0.0), scale) + c + lineColour(line, lineH, t + vec2(0.7, 0.0), scale)) / 3.0;
+	const float y = luma(c);
+	return clamp(s + (y - luma(s)), 0.0, 1.0);
+}
+
+// ---- EASU (after FidelityFX Super Resolution 1) ----
+float easuLuma(vec3 c)
+{
+	return c.g + 0.5 * (c.r + c.b);
+}
+
+// one of the four texels around the pixel: its edge direction and strength, weighted by how near it is
+void easuSet(inout vec2 dir, inout float len, float w, float lA, float lB, float lC, float lD, float lE)
+{
+	// lA above, lB left, lC the texel, lD right, lE below
+	float dc = lD - lC, cb = lC - lB;
+	float lenX = max(abs(dc), abs(cb));
+	lenX = lenX > 0.0 ? 1.0 / lenX : 0.0;
+	float dirX = lD - lB;
+	lenX = clamp(abs(dirX) * lenX, 0.0, 1.0);
+	lenX *= lenX;
+	float ec = lE - lC, ca = lC - lA;
+	float lenY = max(abs(ec), abs(ca));
+	lenY = lenY > 0.0 ? 1.0 / lenY : 0.0;
+	float dirY = lE - lA;
+	lenY = clamp(abs(dirY) * lenY, 0.0, 1.0);
+	lenY *= lenY;
+	dir += vec2(dirX, dirY) * w;
+	len += (lenX + lenY) * w;
+}
+
+void easuTap(inout vec3 aC, inout float aW, vec2 off, vec2 dir, vec2 len2, float lob, float clp, vec3 c)
+{
+	vec2 v = vec2(off.x * dir.x + off.y * dir.y, off.x * -dir.y + off.y * dir.x) * len2;
+	float d2 = min(dot(v, v), clp);
+	float wB = 0.4 * d2 - 1.0;
+	float wA = lob * d2 - 1.0;
+	wB *= wB;
+	wA *= wA;
+	wB = 1.5625 * wB - 0.5625;
+	float w = wB * wA;
+	aC += c * w;
+	aW += w;
+}
+
+vec3 easu(vec2 t)
+{
+	const vec2 pp = t - 0.5;          // texel centres at integers
+	const vec2 fp = floor(pp);
+	const vec2 f = pp - fp;
+	const ivec2 i0 = ivec2(fp);
+	//      b c
+	//    e f g h
+	//    i j k l
+	//      n o
+	const vec3 b = fetch(i0 + ivec2(0, -1)), c = fetch(i0 + ivec2(1, -1));
+	const vec3 e = fetch(i0 + ivec2(-1, 0)), ff = fetch(i0), g = fetch(i0 + ivec2(1, 0)), h = fetch(i0 + ivec2(2, 0));
+	const vec3 i = fetch(i0 + ivec2(-1, 1)), j = fetch(i0 + ivec2(0, 1)), k = fetch(i0 + ivec2(1, 1)), l = fetch(i0 + ivec2(2, 1));
+	const vec3 n = fetch(i0 + ivec2(0, 2)), oo = fetch(i0 + ivec2(1, 2));
+	const float lb = easuLuma(b), lc = easuLuma(c), le = easuLuma(e), lf = easuLuma(ff), lg = easuLuma(g), lh = easuLuma(h);
+	const float li = easuLuma(i), lj = easuLuma(j), lk = easuLuma(k), ll = easuLuma(l), ln = easuLuma(n), lo = easuLuma(oo);
+	vec2 dir = vec2(0.0);
+	float len = 0.0;
+	easuSet(dir, len, (1.0 - f.x) * (1.0 - f.y), lb, le, lf, lg, lj);
+	easuSet(dir, len, f.x * (1.0 - f.y), lc, lf, lg, lh, lk);
+	easuSet(dir, len, (1.0 - f.x) * f.y, lf, li, lj, lk, ln);
+	easuSet(dir, len, f.x * f.y, lg, lj, lk, ll, lo);
+	float dirR = dot(dir, dir);
+	if (dirR < 1.0 / 32768.0) {
+		dir = vec2(1.0, 0.0);
+	} else {
+		dir *= inversesqrt(dirR);
+	}
+	len = len * 0.5;
+	len *= len;
+	const float stretch = dot(dir, dir) / max(abs(dir.x), abs(dir.y));
+	const vec2 len2 = vec2(1.0 + (stretch - 1.0) * len, 1.0 - 0.5 * len);
+	const float lob = 0.5 + (0.25 - 0.04 - 0.5) * len;
+	const float clp = 1.0 / lob;
+	vec3 aC = vec3(0.0);
+	float aW = 0.0;
+	easuTap(aC, aW, vec2(0.0, -1.0) - f, dir, len2, lob, clp, b);
+	easuTap(aC, aW, vec2(1.0, -1.0) - f, dir, len2, lob, clp, c);
+	easuTap(aC, aW, vec2(-1.0, 1.0) - f, dir, len2, lob, clp, i);
+	easuTap(aC, aW, vec2(0.0, 1.0) - f, dir, len2, lob, clp, j);
+	easuTap(aC, aW, vec2(0.0, 0.0) - f, dir, len2, lob, clp, ff);
+	easuTap(aC, aW, vec2(-1.0, 0.0) - f, dir, len2, lob, clp, e);
+	easuTap(aC, aW, vec2(1.0, 1.0) - f, dir, len2, lob, clp, k);
+	easuTap(aC, aW, vec2(2.0, 1.0) - f, dir, len2, lob, clp, l);
+	easuTap(aC, aW, vec2(2.0, 0.0) - f, dir, len2, lob, clp, h);
+	easuTap(aC, aW, vec2(1.0, 0.0) - f, dir, len2, lob, clp, g);
+	easuTap(aC, aW, vec2(1.0, 2.0) - f, dir, len2, lob, clp, oo);
+	easuTap(aC, aW, vec2(0.0, 2.0) - f, dir, len2, lob, clp, n);
+	const vec3 mn = min(min(ff, g), min(j, k)), mx = max(max(ff, g), max(j, k));
+	return clamp(aC / max(aW, 1e-5), mn, mx);
+}
+
+// ---- xBR-style corners for pixel art ----
+float xd(vec3 a, vec3 b)
+{
+	vec3 dd = abs(a - b);
+	return dot(dd, vec3(0.299, 0.587, 0.114)) + 0.25 * (dd.r + dd.b);
+}
+
+vec3 pixelArt(vec2 t, vec2 scale)
+{
+	const vec2 ip = floor(t);
+	const vec2 fp = t - ip;              // 0..1 inside the texel
+	const ivec2 E0 = ivec2(ip);
+	const vec3 E = fetch(E0);
+	// the corner of the texel this pixel is in
+	const ivec2 dx = ivec2(fp.x < 0.5 ? -1 : 1, 0);
+	const ivec2 dy = ivec2(0, fp.y < 0.5 ? -1 : 1);
+	const vec3 F = fetch(E0 + dx), H = fetch(E0 + dy), I = fetch(E0 + dx + dy);
+	const vec3 D = fetch(E0 - dx), B = fetch(E0 - dy);
+	const vec3 C = fetch(E0 + dx - dy), G = fetch(E0 - dx + dy);
+	const vec3 F4 = fetch(E0 + 2 * dx), H5 = fetch(E0 + 2 * dy);
+	const vec3 I4 = fetch(E0 + 2 * dx + dy), I5 = fetch(E0 + dx + 2 * dy);
+	const float wdE = xd(E, C) + xd(E, G) + xd(I, F4) + xd(I, H5) + 4.0 * xd(H, F);
+	const float wdI = xd(H, D) + xd(H, I5) + xd(F, I4) + xd(F, B) + 4.0 * xd(E, I);
+	if (!(wdE < wdI) || xd(E, F) < 0.01 && xd(E, H) < 0.01) {
+		return E;
+	}
+	const vec3 px = xd(E, F) <= xd(E, H) ? F : H;
+	// the corner cut along the edge: u + v > 1.5 in the corner's own coordinates, softened by a pixel's width
+	const float u = dx.x > 0 ? fp.x : 1.0 - fp.x;
+	const float v = dy.y > 0 ? fp.y : 1.0 - fp.y;
+	const float aa = 0.75 / min(scale.x, scale.y);
+	const float cover = smoothstep(1.5 - aa, 1.5 + aa, u + v);
+	return mix(E, px, cover);
+}
+
+void main()
+{
+	const ivec2 o = ivec2(gl_GlobalInvocationID.xy);
+
+	if (p.mode == 20) { // PREPARE
+		const ivec2 st = ivec2((p.dbl & 1) != 0 ? 2 : 1, (p.dbl & 2) != 0 ? 2 : 1);
+		const ivec2 n = ivec2(p.rect.zw) / st;
+		if (o.x >= n.x || o.y >= n.y)
+			return;
+		imageStore(dst, o, vec4(texelFetch(src, ivec2(p.rect.xy) + o * st, 0).rgb, 1.0));
+		return;
+	}
+
+	if (p.mode == 15) { // NL-MEANS, at the source's own texels
+		if (o.x >= int(p.rect.z) || o.y >= int(p.rect.w))
+			return;
+		const ivec2 t = ivec2(p.rect.xy) + o;
+		// brightness decides which neighbourhoods look alike (MPEG keeps colour at half size, in 16x16 blocks, so
+		// colour steps are mostly blocks); brightness is averaged over the closest matches, colour over wider ones
+		float own[25];
+		for (int k = 0; k < 25; k++)
+			own[k] = luma(fetch(t + ivec2(k % 5 - 2, k / 5 - 2)));
+		const float h = mix(5.0, 12.0, p.strength) / 255.0;
+		const float invY = 1.0 / (h * h * 25.0);
+		const float invC = invY / 6.25; // colour: 2.5 times the tolerance
+		vec3 sumY = vec3(0.0), sumC = vec3(0.0);
+		float wY = 0.0, wC = 0.0, wmax = 0.0;
+		for (int dy = -5; dy <= 5; dy++)
+			for (int dx = -5; dx <= 5; dx++) {
+				if (dx == 0 && dy == 0)
+					continue;
+				const ivec2 q = t + ivec2(dx, dy);
+				float d2 = 0.0;
+				for (int k = 0; k < 25; k++) {
+					const float a = own[k] - luma(fetch(q + ivec2(k % 5 - 2, k / 5 - 2)));
+					d2 += a * a;
+				}
+				const vec3 n = fetch(q);
+				const float w = exp(-d2 * invY), wc = exp(-d2 * invC);
+				sumY += n * w;
+				wY += w;
+				sumC += n * wc;
+				wC += wc;
+				wmax = max(wmax, w);
+			}
+		const vec3 c = fetch(t);
+		const float self = max(wmax, 1e-3); // the pixel itself, as much as its best match (the usual NL-means rule)
+		const vec3 y = (sumY + c * self) / (wY + self);
+		const vec3 cc = (sumC + c) / (wC + 1.0);
+		// brightness from the close matches, colour from the wide ones
+		imageStore(dst, t, vec4(clamp(cc + (luma(y) - luma(cc)), 0.0, 1.0), 1.0));
+		return;
+	}
+
+	if (p.mode == 10) { // DENOISE, at the source's own texels
+		if (o.x >= int(p.rect.z) || o.y >= int(p.rect.w))
+			return;
+		const ivec2 t = ivec2(p.rect.xy) + o;
+		const vec3 c = fetch(t);
+		const float th = 0.05 + 0.10 * p.strength; // steps smaller than this are smoothed
+		vec3 sum = c;
+		float wsum = 1.0;
+		for (int dy = -1; dy <= 1; dy++)
+			for (int dx = -1; dx <= 1; dx++) {
+				if (dx == 0 && dy == 0)
+					continue;
+				const vec3 n = fetch(t + ivec2(dx, dy));
+				const float d = length(n - c);
+				const float w = (dx == 0 || dy == 0 ? 1.0 : 0.6) * clamp(1.0 - d / th, 0.0, 1.0);
+				sum += n * w;
+				wsum += w;
+			}
+		imageStore(dst, t, vec4(sum / wsum, 1.0));
+		return;
+	}
+
+	if (p.mode == 13) { // SHARPEN at the source's texels
+		if (o.x >= int(p.rect.z) || o.y >= int(p.rect.w))
+			return;
+		const ivec2 t = ivec2(p.rect.xy) + o;
+		const vec3 e = fetch(t), b = fetch(t + ivec2(0, -1)), d = fetch(t + ivec2(-1, 0)), f = fetch(t + ivec2(1, 0)),
+			h = fetch(t + ivec2(0, 1));
+		const vec3 mn = min(e, min(min(b, d), min(f, h)));
+		const vec3 mx = max(e, max(max(b, d), max(f, h)));
+		const vec3 amp = sqrt(clamp(min(mn, 1.0 - mx) / max(mx, vec3(1e-4)), 0.0, 1.0));
+		const vec3 w = amp * mix(-0.125, -0.2, p.strength);
+		const vec3 c = (e + w * (b + d + f + h)) / (1.0 + 4.0 * w);
+		imageStore(dst, t, vec4(clamp(c, 0.0, 1.0), 1.0));
+		return;
+	}
+
+	if (o.x >= int(p.outSize.x) || o.y >= int(p.outSize.y))
+		return;
+
+	if (p.mode == 11) { // SHARPEN (CAS), output pixels in, output pixels out
+		const ivec2 hi = ivec2(p.outSize) - 1;
+		const vec3 e = texelFetch(src, o, 0).rgb;
+		const vec3 b = texelFetch(src, clamp(o + ivec2(0, -1), ivec2(0), hi), 0).rgb;
+		const vec3 d = texelFetch(src, clamp(o + ivec2(-1, 0), ivec2(0), hi), 0).rgb;
+		const vec3 f = texelFetch(src, clamp(o + ivec2(1, 0), ivec2(0), hi), 0).rgb;
+		const vec3 h = texelFetch(src, clamp(o + ivec2(0, 1), ivec2(0), hi), 0).rgb;
+		const vec3 mn = min(e, min(min(b, d), min(f, h)));
+		const vec3 mx = max(e, max(max(b, d), max(f, h)));
+		const vec3 amp = sqrt(clamp(min(mn, 1.0 - mx) / max(mx, vec3(1e-4)), 0.0, 1.0));
+		const vec3 w = amp * mix(-0.125, -0.2, p.strength);
+		const vec3 c = (e + w * (b + d + f + h)) / (1.0 + 4.0 * w);
+		imageStore(dst, o, vec4(clamp(c, 0.0, 1.0), 1.0));
+		return;
+	}
+
+	const vec2 scale = p.outSize / p.rect.zw;            // output pixels per texel
+	vec2 t = p.rect.xy + (vec2(o) + 0.5) / scale;         // where this pixel is in the source, texels
+	vec3 c;
+	float frame = 1.0; // CRT: inside the curved screen (1), outside (0), the edge in between
+	float vignette = 1.0;
+	if (p.mode == 4) {
+		// a gently curved screen: the picture pulled in towards the corners, which are rounded
+		const vec2 uv = (vec2(o) + 0.5) / p.outSize;
+		const vec2 cc = uv - 0.5;
+		const vec2 bent = uv + cc * dot(cc, cc) * vec2(0.06, 0.08);
+		const vec2 e = abs(bent - 0.5) - 0.5 + 0.02;          // rounded corners, 2% of the size
+		const float outside = length(max(e, 0.0)) + min(max(e.x, e.y), 0.0) - 0.02;
+		const float px = 1.0 / min(p.outSize.x, p.outSize.y);
+		frame = 1.0 - smoothstep(-px, px, outside);
+		vignette = 1.0 - 0.35 * dot(cc, cc);
+		t = p.rect.xy + bent * p.rect.zw;
+	}
+
+	if (p.mode == 1) {
+		c = sharpBilinear(t, scale);
+	} else if (p.mode == 2) {
+		c = clamp(catmull(t), 0.0, 1.0);
+	} else if (p.mode == 14) {
+		c = easu(t);
+	} else if (p.mode == 5) {
+		c = pixelArt(t, scale);
+	} else if (p.mode == 16) {
+		// FMV clean-up's upscale: video smooth (the halo-free bicubic), text and drawn graphics crisp (texels as
+		// blocks with an anti-aliased edge a third of a texel wide, as Sharp). Writing and graphics are told from
+		// video by how their edges change: in one texel, all of the contrast around it (video's edges, even strong
+		// ones, are spread over two or more texels by MPEG)
+		const ivec2 i = ivec2(floor(t - 0.5));
+		float l[16];
+		for (int k = 0; k < 16; k++)
+			l[k] = luma(fetch(i + ivec2(k % 4 - 1, k / 4 - 1))); // the 4x4 texels around the pixel
+		float lo = l[0], hi = l[0], step = 0.0;
+		for (int k = 0; k < 16; k++) {
+			lo = min(lo, l[k]);
+			hi = max(hi, l[k]);
+			if (k % 4 < 3)
+				step = max(step, abs(l[k + 1] - l[k]));
+			if (k < 12)
+				step = max(step, abs(l[k + 4] - l[k]));
+		}
+		const float range = hi - lo;
+		const float sudden = step / max(range, 1e-3); // 1: the whole contrast in one step
+		const float edge = smoothstep(0.25, 0.4, range) * smoothstep(0.8, 0.95, sudden);
+		const vec3 a = fetch(i), b = fetch(i + ivec2(1, 0)), cc = fetch(i + ivec2(0, 1)), d = fetch(i + ivec2(1, 1));
+		const vec3 soft = clamp(catmull(t), min(min(a, b), min(cc, d)), max(max(a, b), max(cc, d)));
+		c = edge > 0.0 ? mix(soft, sharpBilinear(t, min(scale, vec2(3.0))), edge) : soft;
+	} else if (p.mode == 12) {
+		// Catmull-Rom, kept within the 2x2 texels around it: sharp edges without the light and dark halos
+		const ivec2 i = ivec2(floor(t - 0.5));
+		const vec3 a = fetch(i), b = fetch(i + ivec2(1, 0)), cc = fetch(i + ivec2(0, 1)), d = fetch(i + ivec2(1, 1));
+		c = clamp(catmull(t), min(min(a, b), min(cc, d)), max(max(a, b), max(cc, d)));
+	} else if (p.mode == 3 || p.mode == 4) {
+		const float lines = float(p.lines > 0 ? p.lines : int(p.rect.w));
+		const float lineH = p.rect.w / lines;                 // texels per scanline
+		const float pos = (t.y - p.rect.y) / lineH;          // in scanlines
+		const float line = clamp(floor(pos), 0.0, lines - 1.0);
+		const float d = pos - line - 0.5;                     // -0.5..0.5 from the line's centre
+		const vec3 c0 = lineColour(line, lineH, t, scale);
+		if (p.mode == 3) {
+			// the line, and a gap that is darker the more of it there is
+			const float beam = exp(-d * d / (2.0 * 0.28 * 0.28));
+			const float gap = mix(0.35, 0.65, 1.0 - p.strength);
+			c = c0 * mix(gap, 1.0, beam) * 1.08;
+		} else {
+			// a TV's beams, in linear light: each line a gaussian that widens with brightness, the next line's
+			// beam overlapping it; colour softer than brightness along the line (PAL's narrower colour signal);
+			// then the phosphor mask, the light lost to it given back, and the glow around bright parts
+			const float other = d < 0.0 ? max(line - 1.0, 0.0) : min(line + 1.0, lines - 1.0);
+			const float d1 = d < 0.0 ? d + 1.0 : d - 1.0;
+			const vec3 l0 = pow(bleed(line, lineH, t, scale), vec3(2.4));
+			const vec3 l1 = pow(bleed(other, lineH, t, scale), vec3(2.4));
+			const vec3 w0 = mix(vec3(0.18), vec3(0.34), sqrt(l0));
+			const vec3 w1 = mix(vec3(0.18), vec3(0.34), sqrt(l1));
+			vec3 lin = l0 * exp(-d * d / (2.0 * w0 * w0)) + l1 * exp(-d1 * d1 / (2.0 * w1 * w1));
+			const int m = o.x % 3; // aperture grille: one phosphor stripe of each colour every three pixels
+			const float dim = mix(0.75, 0.55, p.strength);
+			const vec3 mask = m == 0 ? vec3(1.0, dim, dim) : m == 1 ? vec3(dim, 1.0, dim) : vec3(dim, dim, 1.0);
+			lin *= mask * (1.0 / mix(0.75, 0.62, p.strength)) * 1.15;
+			// halation: light spread in the glass around bright parts (a soft disc of the picture, 2 texels across)
+			vec3 glow = pow(bilinear(t), vec3(2.4)) * 0.2;
+			for (int k = 0; k < 8; k++) {
+				const float a = float(k) * 0.785398;
+				glow += pow(bilinear(t + 1.6 * vec2(cos(a), sin(a))), vec3(2.4)) * 0.1;
+			}
+			lin += glow * 0.12;
+			c = pow(clamp(lin * vignette, 0.0, 1.0), vec3(1.0 / 2.2)) * frame;
+		}
+	} else {
+		c = bilinear(t);
+	}
+	imageStore(dst, o, vec4(clamp(c, 0.0, 1.0), 1.0));
+}

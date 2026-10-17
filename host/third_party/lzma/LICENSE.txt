@@ -1,0 +1,3 @@
+These files are from the LZMA SDK part of 7-Zip (https://github.com/ip7z/7zip, version 26.03, folder C/),
+by Igor Pavlov. Every .c file here carries the line "Igor Pavlov : Public domain" in its header; the
+headers are the same. No change has been made to them. See also lzma.txt.

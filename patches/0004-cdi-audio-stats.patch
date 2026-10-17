@@ -1,0 +1,157 @@
+diff --git a/src/devices/sound/dmadac.cpp b/src/devices/sound/dmadac.cpp
+index ae2ebce6..6fa41903 100644
+--- a/src/devices/sound/dmadac.cpp
++++ b/src/devices/sound/dmadac.cpp
+@@ -23,6 +23,12 @@
+ 
+ #define DEFAULT_SAMPLE_RATE         (48000)
+ 
++/* ps5-cdi: what the CD-i's sound did, for the host's log (see dmadac.h) */
++extern "C" { unsigned long cdi_audio_stats[CDI_AUDIO_STATS]; }
++/* (the core exports only retro_* names) */
++extern "C" unsigned long *retro_cdi_audio_stats(void) { return cdi_audio_stats; }
++static const dmadac_sound_device *s_stats_dac; /* the first DAC (left): the one counted */
++
+ 
+ /*************************************
+  *
+@@ -37,6 +43,9 @@
+ void dmadac_sound_device::device_start()
+ {
+ 	initialize_state();
++	if (!s_stats_dac)
++		s_stats_dac = this;
++	m_counted = (this == s_stats_dac);
+ 
+ 	/* allocate a stream channel */
+ 	m_channel = stream_alloc(0, 1, DEFAULT_SAMPLE_RATE);
+@@ -135,6 +144,12 @@ void dmadac_set_frequency(dmadac_sound_device **devlist, uint8_t num_channels, d
+ 
+ void dmadac_sound_device::set_frequency(double frequency)
+ {
++	if (this == s_stats_dac && u32(frequency) != m_stats_rate)
++	{
++		if (m_stats_rate)
++			cdi_audio_stats[CDI_AS_RATE_CHANGES]++;
++		m_stats_rate = u32(frequency);
++	}
+ 	m_channel->set_sample_rate(frequency);
+ }
+ 
+@@ -192,6 +207,13 @@ void dmadac_sound_device::sound_stream_update(sound_stream &stream, std::vector<
+ 		curout = (curout + 1) % BUFFER_SIZE;
+ 	}
+ 
++	/* ps5-cdi: running dry part way through: the sound stops here (a gap, if more comes soon) */
++	if (this == s_stats_dac && sampindex > 0 && sampindex < output.samples())
++	{
++		cdi_audio_stats[CDI_AS_DRY]++;
++		cdi_audio_stats[CDI_AS_DRY_SAMPLES] += output.samples() - sampindex;
++	}
++
+ 	/* fill the rest with silence */
+ 	output.fill(0, sampindex);
+ 
+diff --git a/src/devices/sound/dmadac.h b/src/devices/sound/dmadac.h
+index 8f3f88ba..a397db06 100644
+--- a/src/devices/sound/dmadac.h
++++ b/src/devices/sound/dmadac.h
+@@ -12,6 +12,23 @@
+ 
+ #pragma once
+ 
++/* ps5-cdi: counters of what the CD-i's sound did, read (and the max reset) by the host for its log */
++enum
++{
++	CDI_AS_DRY,           /* the DAC ran out of samples part way through an update */
++	CDI_AS_DRY_SAMPLES,   /* the silent samples that followed */
++	CDI_AS_OVERRUN,       /* samples dropped: the DAC's buffer was full */
++	CDI_AS_MAP_SECTORS,   /* audio map (sound from memory) sectors played */
++	CDI_AS_DISC_SECTORS,  /* real-time audio sectors played from the disc */
++	CDI_AS_MAP_PREEMPTED, /* audio map playback stopped by a disc audio sector */
++	CDI_AS_MAP_STARTS,    /* audio map playback started by the program */
++	CDI_AS_MAX_LEVEL,     /* the most samples waiting in the DAC when a sector arrived */
++	CDI_AS_RATE_CHANGES,  /* sample rate changes */
++	CDI_AS_MAP_STOPS,     /* audio map playback ended */
++	CDI_AUDIO_STATS = 16
++};
++extern "C" { extern unsigned long cdi_audio_stats[CDI_AUDIO_STATS]; }
++
+ 
+ class dmadac_sound_device : public device_t, public device_sound_interface
+ {
+@@ -40,10 +57,16 @@ public:
+ 				src += frame_spacing;
+ 			}
+ 			m_bufin = curin;
++
++			/* ps5-cdi: counted on the first DAC only */
++			if (m_counted && j != total_frames)
++				cdi_audio_stats[CDI_AS_OVERRUN] += total_frames - j;
+ 		}
+ 	}
+ 
+ 	void enable(uint8_t enable);
++	/* ps5-cdi: the samples waiting to be played */
++	u32 queued() const { return (m_bufin + BUFFER_SIZE - m_bufout) % BUFFER_SIZE; }
+ 	void set_frequency(double frequency);
+ 	void set_volume(uint16_t volume);
+ 
+@@ -58,6 +81,8 @@ private:
+ 	// internal state
+ 	/* sound stream and buffers */
+ 	sound_stream *  m_channel;
++	u32             m_stats_rate = 0;
++	bool            m_counted = false;
+ 	std::vector<stream_buffer::sample_t> m_buffer;
+ 	uint32_t          m_bufin;
+ 	uint32_t          m_bufout;
+diff --git a/src/mame/machine/cdicdic.cpp b/src/mame/machine/cdicdic.cpp
+index 43c9417e..e26f6704 100644
+--- a/src/mame/machine/cdicdic.cpp
++++ b/src/mame/machine/cdicdic.cpp
+@@ -421,6 +421,10 @@ void cdicdic_device::play_audio_sector(const uint8_t coding, const uint8_t *data
+ 	m_dmadac[0]->set_volume(0x100);
+ 	m_dmadac[1]->set_volume(0x100);
+ 
++	// ps5-cdi: how much was still waiting to be played when this sector came (the host logs the most)
++	if (m_dmadac[0]->queued() > cdi_audio_stats[CDI_AS_MAX_LEVEL])
++		cdi_audio_stats[CDI_AS_MAX_LEVEL] = m_dmadac[0]->queued();
++
+     const uint16_t bps = ((coding & CODING_BPS_MASK) == CODING_8BPS);
+ 	const uint16_t chan = ((coding & CODING_CHAN_MASK) == CODING_STEREO);
+ 	const uint16_t num_samples = 8 >> (bps + chan);
+@@ -487,6 +491,7 @@ void cdicdic_device::process_audio_map()
+ 		m_audio_sector_counter = 0;
+ 		m_audio_format_sectors = 0;
+ 		m_decoding_audio_map = false;
++		cdi_audio_stats[CDI_AS_MAP_STOPS]++;
+ 		return;
+ 	}
+ 
+@@ -508,6 +513,7 @@ void cdicdic_device::process_audio_map()
+ 		{
+ 			swapped_data[i ^ 1] = ram[i];
+ 		}
++		cdi_audio_stats[CDI_AS_MAP_SECTORS]++;
+ 		play_audio_sector(coding, swapped_data);
+ 	}
+ 	else
+@@ -751,6 +757,9 @@ void cdicdic_device::process_disc_sector()
+ 		if (is_mode2_audio_selected(buffer))
+ 		{
+ 			m_audio_sector_counter = get_sector_count_for_coding(buffer[SECTOR_CODING2]);
++			if (m_decoding_audio_map)
++				cdi_audio_stats[CDI_AS_MAP_PREEMPTED]++;
++			cdi_audio_stats[CDI_AS_DISC_SECTORS]++;
+ 			m_decoding_audio_map = false;
+ 
+ 			play_audio_sector(buffer[SECTOR_CODING2], buffer + SECTOR_DATA);
+@@ -1092,6 +1101,7 @@ void cdicdic_device::regs_w(offs_t offset, uint16_t data, uint16_t mem_mask)
+ 				m_audio_sector_counter = 1;
+ 				m_decoding_audio_map = true;
+ 				std::fill_n(m_xa_last, 4, 0);
++				cdi_audio_stats[CDI_AS_MAP_STARTS]++;
+ 
+ 				// Playback runs from the moment the driver arms it. Leaving the
+ 				// tick free-running since power-up instead quantises the start

@@ -1,0 +1,17 @@
+diff --git a/src/osd/libretro/retromain.cpp b/src/osd/libretro/retromain.cpp
+index a2ad4b3c..616a14b5 100644
+--- a/src/osd/libretro/retromain.cpp
++++ b/src/osd/libretro/retromain.cpp
+@@ -178,7 +178,11 @@ int mmain(int argc, char *argv[])
+ 
+ 	std::vector<std::string> args(argv, argv+argc);
+ 
+-	static retro_options retro_global_options;
++	/* ps5-cdi: a fresh set of options for every game. This was a static object kept from game to game: the
++	 * first game's disc image option ends up pegged above command-line priority, so the next game's
++	 * "-cdrom <file>" was ignored and the CD-i kept reading the previous game's disc. The old set is left
++	 * alone (the previous machine's objects may still point at it); it is a few kilobytes per game. */
++	retro_options &retro_global_options = *new retro_options();
+ 	// disable I/O buffering
+ 	setvbuf(stdout, (char *) nullptr, _IONBF, 0);
+ 	setvbuf(stderr, (char *) nullptr, _IONBF, 0);

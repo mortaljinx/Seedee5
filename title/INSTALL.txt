@@ -1,0 +1,64 @@
+Seedee5 1.20 - a Philips CD-i emulator for the PS5
+=================================================
+
+Seedee5 plays Philips CD-i discs (as .chd, .cue/.bin, .iso or .7z files) on a jailbroken PS5 that runs
+homebrew titles. It is the SAME_CDI core (MAME's CD-i emulation) with its own game list, settings and picture
+filters. No games, no BIOS and no keys come with it: you need your own.
+
+What you need
+-------------
+* A PS5 that runs homebrew titles from /data/homebrew (a firmware and loader that support them).
+* An FTP server on the console (most homebrew setups have one, usually on port 2121).
+* The CD-i BIOS from your own CD-i player: cdimono1.zip, the set MAME and RetroArch's SAME_CDI use.
+  vmpega.rom in it (the Digital Video cartridge) makes the FMV games work (Mad Dog McCree, Burn:Cycle...).
+* Your CD-i games, as files.
+
+Install
+-------
+1. Unzip the release. It holds one folder named PPSA99142.
+2. Copy that folder over FTP to /data/homebrew/ on the console, so you have /data/homebrew/PPSA99142/eboot.bin.
+3. Start Seedee5 from the console's home screen (your loader lists it, or it appears as an icon).
+
+On its first start it makes its folders and opens Settings:
+
+    /data/homebrew/PPSA99142/data/
+        roms/                         your games (folders inside are fine)
+        system/same_cdi/bios/         cdimono1.zip goes here
+        covers/                       box art (missing covers are downloaded)
+        saves/                        saved games, states, settings, logs
+        READ ME.txt                   the same list, on the console
+
+4. Copy cdimono1.zip into data/system/same_cdi/bios/ (or let Settings > CD-i BIOS find it on your NAS).
+5. Copy games into data/roms/, or set up a NAS: Settings > NAS > Find NAS on my network, pick the share and the
+   folder with the games. Games on a NAS are copied to the console when you start them.
+
+Updating: copy the new PPSA99142 folder over the old one. Everything in data/ stays.
+Do NOT delete the PPSA99142 folder to update: data/ (your saves) is inside it. Back it up first, or turn on
+Settings > NAS > Back up saves to the NAS.
+
+Using it
+--------
+The wheel:   left stick / D-pad spins it, L1/R1 jump a letter (hold to keep going), L2/R2 ten games,
+             Cross opens a game's card, Triangle makes it a favourite, Square looks for games again,
+             the touch pad shows the next list (Favourites, Recently played, On this console, On the NAS),
+             OPTIONS opens Settings, holding OPTIONS closes the app.
+A game:      the sticks and the D-pad move the CD-i's pointer; Cross and Square are its button 1, Circle and
+             Triangle its button 2 (change it in Settings > Controls). The touch pad opens the menu: save and
+             load states, discs, Screen (4:3 / 16:9), Crop, Picture, Rewind, Reset, Back to the game list.
+Starting:    the CD-i player's own start-up is skipped ("Starting" card). The first time a game reaches the
+             player's start screen, click Play CD-i as usual: it is remembered, and from then on games start
+             by themselves. Leave a game after playing a while and its card offers Continue.
+Picture:     Default, Sharp, Smooth, Enhanced, FSR, Pixel art, Scanlines, CRT, and FMV clean-up (light, medium,
+             strong) for the Digital Video games: it removes MPEG's blocks. All drawn at 4K.
+Rewind:      turn Rewind on in the game's menu, then hold L2 to go back.
+Two players: a second signed-in controller moves the pointer and presses the buttons too (Settings > Controls).
+
+If something goes wrong, the logs are data/saves/title_log.txt, cdi_log.txt and nas_log.txt.
+
+Licences
+--------
+Seedee5 is free software under the GNU General Public License, version 3 or later. It contains the SAME_CDI
+core (MAME; GPL-2.0-or-later and BSD-3-Clause), libnfs (LGPL-2.1-or-later), BearSSL (MIT), the LZMA SDK (public
+domain), stb_image (public domain / MIT) and the PS5 Vulkan Template, its UI kit and runtime (MIT; their notices
+are in LEGAL.txt and licenses/). The source of this release is published with it (Seedee5-<version>-source.tar.gz).
+Philips and CD-i are trademarks of their owners; this project is not affiliated with them.

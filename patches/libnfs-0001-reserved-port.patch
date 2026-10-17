@@ -1,0 +1,45 @@
+diff --git a/lib/socket.c b/lib/socket.c
+index 7897efb..aa89937 100644
+--- a/lib/socket.c
++++ b/lib/socket.c
+@@ -126,6 +126,31 @@ rpc_nfs4_rebind_session(struct rpc_context *rpc);
+ #define RESOLVE_RETRIES      3
+ #define RESOLVE_RETRY_NSECS  (100 * 1000 * 1000)
+ 
++/* ps5-cdi patch: many NFS servers (the Linux default "secure" export option, most NAS boxes) accept connections
++ * only from a reserved source port (below 1024). A program with root rights can bind one, so with this switch
++ * set, every TCP connection first tries to bind a port from 1023 downwards (a failed bind is not an error: the
++ * connection is then made from an ordinary port, as before). */
++int libnfs_reserved_port = 0;
++
++static void
++bind_reserved_port(int fd)
++{
++	struct sockaddr_in sa;
++	int one = 1;
++
++	setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (char *)&one, sizeof(one));
++	memset(&sa, 0, sizeof(sa));
++	sa.sin_family = AF_INET;
++	sa.sin_addr.s_addr = htonl(INADDR_ANY);
++	for (int port = 1023; port >= 600; port--) {
++		sa.sin_port = htons((uint16_t)port);
++		if (bind(fd, (struct sockaddr *)&sa, sizeof(sa)) == 0)
++			return;
++		if (errno != EADDRINUSE && errno != EADDRNOTAVAIL)
++			return; /* no right to use reserved ports: give up quietly */
++	}
++}
++
+ static int
+ create_socket(int domain, int type, int protocol)
+ {
+@@ -1873,6 +1898,8 @@ rpc_connect_sockaddr_async(struct rpc_context *rpc)
+ 			/* Report the socket error, not a bogus bind error */
+ 			break;
+ 		}
++		if (libnfs_reserved_port)
++			bind_reserved_port(rpc->fd);
+ 		if (set_bind_device(rpc->fd, rpc->ifname) != 0) {
+ 			rpc_set_error (rpc, "Failed to bind to interface");
+ 			return -1;

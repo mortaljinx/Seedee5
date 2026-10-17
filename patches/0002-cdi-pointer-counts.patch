@@ -1,0 +1,69 @@
+diff --git a/src/emu/ioport.cpp b/src/emu/ioport.cpp
+index c6aa648..1df8ce2 100644
+--- a/src/emu/ioport.cpp
++++ b/src/emu/ioport.cpp
+@@ -3673,6 +3673,10 @@ void analog_field::frame_update(running_machine &machine)
+ 	{
+ 		m_was_written = false;
+ 		rawvalue = m_prog_analog_value;
++
++		// on a relative port (a mouse axis) the value is the frame's movement
++		if (!m_absolute && !m_positionalscale)
++			itemclass = ITEM_CLASS_RELATIVE;
+ 	}
+ 
+ 	// if we got an absolute input, it overrides everything else
+diff --git a/src/osd/modules/input/input_retro.cpp b/src/osd/modules/input/input_retro.cpp
+index 8e610e8..2b84a01 100644
+--- a/src/osd/modules/input/input_retro.cpp
++++ b/src/osd/modules/input/input_retro.cpp
+@@ -283,6 +283,41 @@ void retro_osd_interface::process_joypad_state(running_machine &machine)
+    }
+ }
+ 
++/* The CD-i's pointer port (cdislave_hle "MOUSEX"/"MOUSEY") ends up with an empty standard
++ * input sequence in this front end, so MAME never reads the mouse device for it and the
++ * mouse counts the front end supplies are lost; only the D-pad (a fixed 2 units per frame)
++ * moves the pointer. Hand the counts to those two ports directly instead: a programmatic
++ * value on an analog port is used as the frame's relative movement, in the same units
++ * (INPUT_RELATIVE_PER_PIXEL per count) that the mouse device would have delivered. */
++static void retro_push_cdi_pointer(running_machine &machine, int dx, int dy)
++{
++	static running_machine *cached = nullptr;
++	static ioport_port *port_x = nullptr, *port_y = nullptr;
++
++	if (cached != &machine)
++	{
++		cached = &machine;
++		port_x = port_y = nullptr;
++		for (auto &entry : machine.ioport().ports())
++		{
++			const std::string &tag = entry.first;
++			if (tag.find("slave") == std::string::npos || tag.size() < 7)
++				continue;
++			if (!tag.compare(tag.size() - 7, 7, ":MOUSEX"))
++				port_x = entry.second.get();
++			else if (!tag.compare(tag.size() - 7, 7, ":MOUSEY"))
++				port_y = entry.second.get();
++		}
++	}
++
++	if (port_x && dx)
++		for (ioport_field &field : port_x->fields())
++			field.set_value(dx * INPUT_RELATIVE_PER_PIXEL);
++	if (port_y && dy)
++		for (ioport_field &field : port_y->fields())
++			field.set_value(dy * INPUT_RELATIVE_PER_PIXEL);
++}
++
+ void retro_osd_interface::process_mouse_state(running_machine &machine)
+ {
+    static int mbL = 0, mbR = 0;
+@@ -298,6 +333,7 @@ void retro_osd_interface::process_mouse_state(running_machine &machine)
+    mouse_y = input_state_cb(0, RETRO_DEVICE_MOUSE, 0, RETRO_DEVICE_ID_MOUSE_Y);
+    mouse_l = input_state_cb(0, RETRO_DEVICE_MOUSE, 0, RETRO_DEVICE_ID_MOUSE_LEFT);
+    mouse_r = input_state_cb(0, RETRO_DEVICE_MOUSE, 0, RETRO_DEVICE_ID_MOUSE_RIGHT);
++	retro_push_cdi_pointer(machine, mouse_x, mouse_y);
+    mouseLX = mouse_x*INPUT_RELATIVE_PER_PIXEL;
+    mouseLY = mouse_y*INPUT_RELATIVE_PER_PIXEL;
+ 

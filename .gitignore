@@ -1,0 +1,46 @@
+# build output
+/build/
+dist/
+*.o
+*.a
+*.so
+*.elf
+*.self
+*.bin
+cdihost
+cdie_sdl
+__pycache__/
+
+# downloaded by scripts/build_title_libs.sh
+/third_party/
+
+# never published: firmware, BIOS, games, keys, a console's own data
+# (the desktop build keeps its BIOS, saves, games and NAS settings next to it)
+/system/
+/saves/
+/roms/
+/covers/
+/cache/
+nfs.cfg
+*.state
+*.nv
+mk48t08
+*.log
+*.rom
+*.chd
+*.iso
+*.cue
+*.7z
+cdimono1.zip
+*.pem
+*.key
+.env
+data/
+klog*.txt
+title_log.txt
+cdi_log.txt
+nas_log.txt
+extras_test
+gameinfo_test
+*.tar.gz
+*.zip

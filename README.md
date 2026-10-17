@@ -77,6 +77,29 @@ python3 scripts/make_release.py /path/to/PS5_CDiWheel 1.20 --with-core-source
 `make` in this folder builds the desktop versions (`cdihost`, and `cdie_sdl`, the same engine with SDL) for testing
 on a PC. How it all works, and why, is in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
+## Credits
+
+Seedee5 stands on other people's work:
+
+- **CD-i emulation:** [SAME_CDI](https://github.com/libretro/same_cdi), the libretro core that builds only
+  MAME's Philips CD-i driver, by Zach Morris and the libretro team. The CD-i driver itself (the CDIC, MCD212 and
+  the rest of the machine) is by Ryan Holtz and the [MAME](https://www.mamedev.org/) team. Seedee5 runs this
+  core with a few small patches of its own (in [`patches/`](patches)).
+- **On the PS5:** mihawk-99's [PS5 Vulkan Template](https://github.com/mihawk-99/PS5_VulkanTemplate), with
+  its [PS5_Mesa](https://github.com/mihawk-99/PS5_Mesa) (RADV, Mesa's Vulkan driver),
+  [PS5_Vulkan](https://github.com/mihawk-99/PS5_Vulkan) and
+  [PS5_PayloadSDK](https://github.com/mihawk-99/PS5_PayloadSDK), and the projects they build on; Sascha
+  Willems' Vulkan example framework; and BlackBearReloaded's UI kit, from which the cover wheel's design comes.
+- **Libraries:** [libnfs](https://github.com/sahlberg/libnfs) (Ronnie Sahlberg) for the NAS,
+  [BearSSL](https://bearssl.org/) (Thomas Pornin) for downloads, the [LZMA SDK](https://www.7-zip.org/sdk.html)
+  (Igor Pavlov) for .7z games, and [stb_image](https://github.com/nothings/stb) (Sean Barrett) for pictures.
+- **Pictures:** box art, logos and screenshots from
+  [libretro-thumbnails](https://github.com/libretro-thumbnails/Philips_-_CD-i) and its contributors.
+- **Words:** game facts from Wikipedia's [List of CD-i games](https://en.wikipedia.org/wiki/List_of_CD-i_games),
+  and each game card's text from that game's Wikipedia article, by Wikipedia's contributors (CC BY-SA 4.0).
+- **Reference:** the [CDi_MiSTer](https://github.com/MiSTer-devel/CDi_MiSTer) FPGA core's CD-i hardware notes
+  helped track down sound behaviour.
+
 ## Licence
 
 Seedee5 is free software under the [GNU General Public License v3.0 or later](LICENSE). It contains the SAME_CDI

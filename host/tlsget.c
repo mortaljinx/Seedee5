@@ -405,7 +405,7 @@ static int get_once(const char *host, int port, const char *path, tls_resolve_fn
     {
         char req[1400];
         int rl = snprintf(req, sizeof req,
-                          "GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: Seedee5/1.20 (PS5 homebrew CD-i emulator)\r\nAccept: */*\r\n"
+                          "GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: Seedee5/1.21 (PS5 homebrew CD-i emulator)\r\nAccept: */*\r\n"
                           "Accept-Encoding: identity\r\nConnection: close\r\n\r\n",
                           path, host);
         if (rl <= 0 || rl >= (int)sizeof req || br_sslio_write_all(&t->io, req, (size_t)rl) < 0 ||

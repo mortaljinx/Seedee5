@@ -860,8 +860,8 @@ project's own (GPL-3.0), written from the published algorithms, not AMD's or Hyl
 
 ## A release anyone can install (v61)
 
-* **Icon:** title/sce_sys/icon0.png (drawn by this project: discs on a wheel and the name), put in the title by
-  make_cdi_title.py.
+* **Icon:** title/sce_sys/icon0.png (the S5 logo, 512x512), put in the title by make_cdi_title.py; the same
+  logo with transparent corners is title/examples/cdiwheel/logo_png.h (the wheel) and docs/seedee5-logo-256.png.
 * **INSTALL.txt** (title/INSTALL.txt): what a user needs, where the folder goes, the BIOS, games, NAS, the
   controls, the logs, the licences.
 * **scripts/make_release.py <title folder> <version> [--with-core-source]**, after ps5/tools/build.sh:

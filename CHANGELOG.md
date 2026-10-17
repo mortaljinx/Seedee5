@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.21 (2026-10-17)
+
+- **New logo:** the S5 icon on the PS5 home screen, at the top left of the wheel and in the README.
+- **Safer downloads:** a cover or game-info download that is redirected now only follows the redirect within the
+  same site or to Wikipedia, GitHub or libretro, never to another address (such as a device on your network).
+- The release's source archive holds exactly the files in the repository.
+- Docs: the title folder is shown as `~/ps5/Seedee5`.
+
 ## 1.20 (2026-10-17)
 
 - **Game cards tell you about the game.** Opening a game shows a few lines about it from its Wikipedia article,

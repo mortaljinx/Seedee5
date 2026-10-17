@@ -56,7 +56,7 @@ struct Game
 };
 
 // The release (Settings shows it; the PS5 home screen shows param.json's, which make_cdi_title.py sets to the same)
-#define SEEDEE5_VERSION "1.20"
+#define SEEDEE5_VERSION "1.21"
 
 struct Library
 {

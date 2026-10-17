@@ -54,7 +54,7 @@ No games, BIOS or keys are included. You need your own.
 
 ## Install
 
-1. Download `Seedee5-1.20.zip` from the Releases page and unzip it. It holds one folder, `PPSA99142`.
+1. Download `Seedee5-1.21.zip` from the Releases page and unzip it. It holds one folder, `PPSA99142`.
 2. Copy that folder over FTP to `/data/homebrew/` on the console.
 3. Start **Seedee5** from the home screen. On its first start it makes its folders and opens Settings.
 4. Put `cdimono1.zip` in `data/system/same_cdi/bios/`, or let *Settings → CD-i BIOS* find it on your NAS.
@@ -84,7 +84,7 @@ python3 title/make_cdi_title.py ~/ps5/Seedee5 --update   # after pulling changes
 scripts/build_title_libs.sh ~/ps5/Seedee5
 cd ~/ps5/Seedee5 && ps5/tools/build.sh
 # the release zip, source archives, notices and checksums
-python3 scripts/make_release.py ~/ps5/Seedee5 1.20 --with-core-source
+python3 scripts/make_release.py ~/ps5/Seedee5 1.21 --with-core-source
 ```
 
 `make` in this folder builds the desktop versions (`cdihost`, and `cdie_sdl`, the same engine with SDL) for testing

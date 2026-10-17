@@ -199,6 +199,10 @@ def set_param(title):
         print(f"   param.json: {', '.join(changed)} -> {APP_NAME} {APP_VERSION}")
     else:
         print(f"   param.json: already {APP_NAME} {APP_VERSION}")
+    # a copy in this project (title/sce_sys/param.json), committed with each release: the homebrew store reads the
+    # contentVersion from the repository to tell consoles there is an update. (Only a record: the title's own
+    # param.json is the one built in.)
+    shutil.copyfile(p, CDI / "title/sce_sys/param.json")
 
 
 def put_files(title):

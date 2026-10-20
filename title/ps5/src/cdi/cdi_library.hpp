@@ -56,7 +56,7 @@ struct Game
 };
 
 // The release (Settings shows it; the PS5 home screen shows param.json's, which make_cdi_title.py sets to the same)
-#define SEEDEE5_VERSION "1.21"
+#define SEEDEE5_VERSION "1.22"
 
 struct Library
 {
@@ -66,6 +66,7 @@ struct Library
     unsigned serial = 0;  // goes up whenever the list itself changed
     std::string nas;      // one line about the NAS ("NAS: 2020 game file(s) found"), or ""
     std::string covers;   // one line about the cover downloads, or ""
+    std::string keepNote; // after a replaced app folder (a store's update): what came back and where the rest is
     int nasState = 0;     // 0 none, 1 connecting, 2 connected, 3 failed
     std::string roomFor;  // where games go, for the empty screen
     std::string view;     // what the wheel shows: "" every game, else "FAVOURITES", "RECENTLY PLAYED"...

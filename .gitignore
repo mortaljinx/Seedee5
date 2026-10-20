@@ -44,3 +44,4 @@ extras_test
 gameinfo_test
 *.tar.gz
 *.zip
+keep_test

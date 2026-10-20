@@ -10,7 +10,7 @@
   "conceptId": "99142",
   "contentBadgeType": 1,
   "contentId": "UP9000-PPSA99142_00-CDIWHEEL00000000",
-  "contentVersion": "01.210.000",
+  "contentVersion": "01.220.000",
   "downloadDataSize": 256,
   "gameIntent": {
     "permittedIntents": [
@@ -28,7 +28,7 @@
       "titleName": "Seedee5"
     }
   },
-  "masterVersion": "01.21",
+  "masterVersion": "01.22",
   "pubtools": {
     "creationDate": "2026-10-11 00:00:00",
     "loudnessSnd0": "-28.00",

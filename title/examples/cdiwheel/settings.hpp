@@ -16,6 +16,19 @@
  */
 #pragma once
 
+
+// Where an address entry starts: this console's own network, .1 (most routers; 10.0.3.1 for a console at
+// 10.0.3.21), so a NAS or DNS server on another network is a few digits away; 192.168.1.1 when not known
+static std::string routerGuess()
+{
+	char me[32];
+	if (cdie_local_ip(me, sizeof me) != 0) {
+		return "192.168.1.1";
+	}
+	std::string s = me;
+	return s.substr(0, s.rfind('.') + 1) + "1";
+}
+
 class SettingsScreen
 {
 public:
@@ -543,7 +556,7 @@ private:
 		case idDns: {
 			char dns[64];
 			cdie_dns_get(dns, sizeof dns);
-			openIp(true, dns[0] ? dns : "192.168.1.1");
+			openIp(true, dns[0] ? dns : routerGuess().c_str());
 			break;
 		}
 		case idRescan:
@@ -559,7 +572,7 @@ private:
 			break;
 		case idEnter:
 		case idEnterInstead:
-			openIp(false, draft.server[0] ? draft.server : "192.168.1.1");
+			openIp(false, draft.server[0] ? draft.server : routerGuess().c_str());
 			break;
 		case idShare:
 			push(Page::shares);

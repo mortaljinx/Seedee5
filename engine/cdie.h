@@ -94,6 +94,10 @@ typedef struct {
 } cdie_extras_info;
 /* The card of game `index` opened (-1: closed). title: the game's name as the list of CD-i games spells it (the
  * article's name, mostly), or NULL. */
+/* A note for the user when the app folder was found replaced (an update by a store) and the safe copy of the
+ * settings and saved games was put back, else "" */
+const char *cdie_keep_note(void);
+
 void cdie_extras_want(int index, const char *title);
 /* 1: out holds what is known for game `index` */
 int cdie_extras_info_get(int index, cdie_extras_info *out);
@@ -266,6 +270,7 @@ int cdie_nas_set(const cdie_nas_cfg *cfg);
 
 int cdie_covers_on(void);
 void cdie_covers_set(int on);
+int cdie_local_ip(char *out, size_t n); /* this console's address on the network ("10.0.3.21"), or -1 */
 void cdie_dns_get(char *out, size_t n); /* the DNS server for cover downloads, or "" for automatic */
 void cdie_dns_set(const char *ip);      /* "" = automatic */
 

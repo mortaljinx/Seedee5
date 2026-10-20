@@ -60,6 +60,9 @@ cdie_sdl: tools/cdie_sdl.c $(ENGINE_SRC) engine/cdie.h host/stb_image.h host/cdi
 extras_test: tools/extras_test.c $(ENGINE_SRC) engine/cdie.h host/cdi_extras.h host/gameinfo.h build/libbearssl.a build/liblzma7z.a
 	$(CC) $(CFLAGS) $(NFS_CFLAGS) $(LZMA_FLAGS) -Iengine -Ihost -Iinclude -I$(BEAR_DIR)/inc -o $@ tools/extras_test.c $(filter-out engine/cdi_engine.c,$(ENGINE_SRC)) build/liblzma7z.a build/libbearssl.a $(NFS_LIBS) -ldl -lpthread
 
+keep_test: tools/keep_test.c $(ENGINE_SRC) engine/cdie.h build/libbearssl.a build/liblzma7z.a
+	$(CC) $(CFLAGS) -fsanitize=address,undefined $(NFS_CFLAGS) $(LZMA_FLAGS) -Iengine -Ihost -Iinclude -I$(BEAR_DIR)/inc -o $@ tools/keep_test.c $(filter-out engine/cdi_engine.c,$(ENGINE_SRC)) build/liblzma7z.a build/libbearssl.a $(NFS_LIBS) -ldl -lpthread
+
 testcore.so: tools/testcore.c include/libretro.h
 	$(CC) $(CFLAGS) -fPIC -shared -Iinclude -o $@ tools/testcore.c -lm
 

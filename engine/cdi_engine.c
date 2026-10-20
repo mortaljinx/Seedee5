@@ -577,6 +577,7 @@ static volatile int g_rewinding; /* (rewind, below: going back is not heard) */
 static int g_rw_enabled, g_rw_cfg_read;
 static void rw_clear(void);
 static void rw_free(void);
+static void keep_backup(void);
 static void rw_cfg_load(void);
 static size_t audio_batch_cb(const int16_t *data, size_t frames)
 {
@@ -2321,6 +2322,30 @@ static bool parse_ipv4(const char *s, unsigned char ip[4])
     return false;
 }
 
+/* This console's address on the local network: a UDP socket "connected" to an outside address (nothing is sent) */
+static int local_ipv4(unsigned char out[4])
+{
+    int fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (fd < 0)
+        return -1;
+    struct sockaddr_in sa;
+    memset(&sa, 0, sizeof sa);
+    sa.sin_family = AF_INET;
+    sa.sin_port = htons(53);
+    inet_pton(AF_INET, "1.1.1.1", &sa.sin_addr);
+    int r = -1;
+    if (connect(fd, (struct sockaddr *)&sa, sizeof sa) == 0) {
+        struct sockaddr_in me;
+        socklen_t len = sizeof me;
+        if (getsockname(fd, (struct sockaddr *)&me, &len) == 0 && me.sin_addr.s_addr != 0) {
+            memcpy(out, &me.sin_addr, 4);
+            r = 0;
+        }
+    }
+    close(fd);
+    return r;
+}
+
 
 /* ------------------------------------------------------------- the network: names and HTTPS */
 
@@ -2417,7 +2442,7 @@ static int net_resolve(const char *host, unsigned char ip[4])
 {
     if (parse_ipv4(host, ip))
         return 0;
-    char servers[4][64];
+    char servers[5][64];
     int ns = 0;
     char path[1400], line[128];
     setting_path(path, sizeof path, g_data_dir, "dns.txt");
@@ -2431,10 +2456,15 @@ static int net_resolve(const char *host, unsigned char ip[4])
         }
         fclose(f);
     }
-    snprintf(servers[ns++], sizeof servers[0], "192.168.1.1");
+    /* the router: most are at .1 of the console's own network (10.0.3.1 for 10.0.3.21); 192.168.1.1 if the
+     * console's address is not known. Then public servers. */
+    unsigned char me[4];
+    if (local_ipv4(me) == 0)
+        snprintf(servers[ns++], sizeof servers[0], "%u.%u.%u.1", me[0], me[1], me[2]);
+    else
+        snprintf(servers[ns++], sizeof servers[0], "192.168.1.1");
     snprintf(servers[ns++], sizeof servers[0], "1.1.1.1");
-    if (ns < 4)
-        snprintf(servers[ns++], sizeof servers[0], "8.8.8.8");
+    snprintf(servers[ns++], sizeof servers[0], "8.8.8.8");
     for (int i = 0; i < ns && !cv_quit; i++) {
         struct in_addr a;
         if (inet_pton(AF_INET, servers[i], &a) != 1)
@@ -4978,6 +5008,7 @@ static int emu_load(const char *game_path, char *msg, size_t mn)
 }
 
 static void rw_free(void);
+static void keep_backup(void);
 static void emu_unload(void)
 {
     if (!g_loaded)
@@ -5013,6 +5044,7 @@ static void emu_unload(void)
 #endif
     g_game_name[0] = 0;
     est_valid = 0;
+    keep_backup(); /* the game's saves and any settings changed: into the safe copy */
     elogf("done: %ld frames, %lu underruns, %lu overruns", e_frames, underruns, overruns);
     notify("cdihost: back to the game list");
 }
@@ -5658,6 +5690,216 @@ static void write_readme(const char *d)
     chmod(p, 0666);
 }
 
+
+/* ------------------------------------------------- a safe copy of what matters, outside the app folder */
+
+/* Everything Seedee5 keeps is in its data folder, inside the app's own folder. A store that updates the app
+ * by replacing that folder (ProsperoStore moves the old one to /data/prosperostore/previous/PPSA99142) takes it
+ * all away. So the small, precious part (settings, NAS settings, saved games, the BIOS) is also copied to the
+ * title's own storage, /download0, which belongs to the title ID rather than to the folder and so survives a
+ * replaced folder. When the data folder turns up new (its marker is gone) and the copy has things it lacks, they
+ * are put back. Not copied: games, the NAS cache, covers (downloaded again) and save states (big; /download0 is
+ * small). Desktop builds: only with CDIE_KEEP_DIR set (tests). */
+#define KEEP_MARKER ".seedee5-data"
+#define KEEP_FILE_MAX (64L << 20)
+#define KEEP_TOTAL_MAX (180LL << 20)
+static char g_keep_dir[600];
+static char g_keep_note[600];
+static int g_keep_restored;
+static long long g_keep_total;
+
+static const char *keep_root(void)
+{
+    const char *env = getenv("CDIE_KEEP_DIR");
+    if (env && *env)
+        return env;
+#ifdef PS5
+    return "/download0/seedee5";
+#else
+    return NULL;
+#endif
+}
+
+/* what is worth keeping: rel is the path inside the data folder */
+static int keep_wanted(const char *rel, int is_dir)
+{
+    const char *base = strrchr(rel, '/');
+    base = base ? base + 1 : rel;
+    if (base[0] == '.' && strcmp(base, KEEP_MARKER) != 0)
+        return 0;
+    if (!strcmp(rel, KEEP_MARKER))
+        return 0;
+    if (is_dir) /* the folders gone into: saves (but not its states) and system */
+        return !strcmp(rel, "saves") || !strcmp(rel, "system") ||
+               ((!strncmp(rel, "saves/", 6) || !strncmp(rel, "system/", 7)) && strcmp(rel, "saves/states") != 0);
+    if (!strchr(rel, '/')) /* the data folder's own settings: nfs.cfg, options.cfg, dns.txt, games_info.txt ... */
+        return strcmp(base, "READ ME.txt") != 0 && strstr(base, "_log") == NULL && strstr(base, ".tmp") == NULL;
+    if (strstr(base, "_log.txt") || strstr(base, ".tmp"))
+        return 0;
+    return !strncmp(rel, "saves/", 6) || !strncmp(rel, "system/", 7);
+}
+
+static int keep_copy(const char *from, const char *to)
+{
+    FILE *in = fopen(from, "rb");
+    if (!in)
+        return -1;
+    char tmp[1300];
+    snprintf(tmp, sizeof tmp, "%s.tmp", to);
+    FILE *out = fopen(tmp, "wb");
+    if (!out) {
+        fclose(in);
+        return -1;
+    }
+    char buf[64 * 1024];
+    size_t n;
+    int ok = 1;
+    while ((n = fread(buf, 1, sizeof buf, in)) > 0)
+        if (fwrite(buf, 1, n, out) != n) {
+            ok = 0;
+            break;
+        }
+    ok = ok && !ferror(in);
+    fclose(in);
+    ok = (fclose(out) == 0) && ok;
+    if (!ok || rename(tmp, to) != 0) {
+        remove(tmp);
+        return -1;
+    }
+    chmod(to, 0666);
+    return 0;
+}
+
+/* copies the wanted files of from (inside the data folder at rel) to to; only_missing: never replace a file */
+static void keep_walk(const char *from_root, const char *to_root, const char *rel, int only_missing, int *copied,
+                      int depth)
+{
+    if (depth > 6)
+        return;
+    char dir[1100];
+    snprintf(dir, sizeof dir, "%s%s%s", from_root, rel[0] ? "/" : "", rel);
+    DIR *d = opendir(dir);
+    if (!d)
+        return;
+    struct dirent *e;
+    while ((e = readdir(d)) != NULL) {
+        if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, ".."))
+            continue;
+        char sub[600], src[1300], dst[1300];
+        snprintf(sub, sizeof sub, "%s%s%s", rel, rel[0] ? "/" : "", e->d_name);
+        snprintf(src, sizeof src, "%s/%s", from_root, sub);
+        snprintf(dst, sizeof dst, "%s/%s", to_root, sub);
+        struct stat a, b;
+        if (stat(src, &a) != 0)
+            continue;
+        if (S_ISDIR(a.st_mode)) {
+            if (keep_wanted(sub, 1)) {
+                mkdirs(dst);
+                keep_walk(from_root, to_root, sub, only_missing, copied, depth + 1);
+            }
+            continue;
+        }
+        if (!S_ISREG(a.st_mode) || !keep_wanted(sub, 0) || a.st_size > KEEP_FILE_MAX)
+            continue;
+        if (!only_missing) { /* (the copy stays well inside /download0's room) */
+            if (g_keep_total + a.st_size > KEEP_TOTAL_MAX)
+                continue;
+            g_keep_total += a.st_size;
+        }
+        const int there = stat(dst, &b) == 0;
+        if (there && (only_missing || (b.st_size == a.st_size && b.st_mtime >= a.st_mtime)))
+            continue;
+        if (keep_copy(src, dst) == 0)
+            (*copied)++;
+    }
+    closedir(d);
+}
+
+static int count_entries(const char *dir)
+{
+    DIR *d = opendir(dir);
+    int n = 0;
+    if (!d)
+        return 0;
+    struct dirent *e;
+    while ((e = readdir(d)) != NULL)
+        if (e->d_name[0] != '.')
+            n++;
+    closedir(d);
+    return n;
+}
+
+/* at start, before anything reads the settings: a data folder without its marker gets back what the copy has */
+static void keep_restore(void)
+{
+    const char *root = keep_root();
+    if (!root)
+        return;
+    snprintf(g_keep_dir, sizeof g_keep_dir, "%s", root);
+    mkdirs(g_keep_dir);
+    char marker[1100], had[1100];
+    snprintf(marker, sizeof marker, "%s/" KEEP_MARKER, g_data_dir);
+    snprintf(had, sizeof had, "%s/" KEEP_MARKER, g_keep_dir);
+    struct stat st;
+    if (stat(marker, &st) != 0 && stat(had, &st) == 0) {
+        int n = 0;
+        keep_walk(g_keep_dir, g_data_dir, "", 1, &n, 0);
+        g_keep_restored = n;
+        /* the copy's marker says how many games the old folder had in roms/ */
+        int games = 0;
+        FILE *f = fopen(had, "r");
+        if (f) {
+            if (fscanf(f, "games=%d", &games) != 1)
+                games = 0;
+            fclose(f);
+        }
+        if (n > 0 || games > 0) {
+            if (games > 0 && count_entries(g_roms_dir) == 0)
+                snprintf(g_keep_note, sizeof g_keep_note,
+                         "The app folder was replaced (an update?). Settings and saved games were put back. Your "
+                         "games are not: if a store updated Seedee5, they are in /data/prosperostore/previous/PPSA99142/"
+                         "data/roms. Copy them back to data/roms over FTP.");
+            else
+                snprintf(g_keep_note, sizeof g_keep_note,
+                         "The app folder was replaced (an update?). Your settings and saved games were put back.");
+        }
+    }
+    else if (stat(marker, &st) != 0) /* a new data folder and no copy: a first start, or an update from 1.21 or older */
+        snprintf(g_keep_note, sizeof g_keep_note,
+                 "Updated with a store from 1.21 or older? Your earlier games, saves and settings are in "
+                 "/data/prosperostore/previous/PPSA99142/data: copy that folder's contents back to data/ over FTP.");
+    FILE *f = fopen(marker, "w");
+    if (f) {
+        fputs("Seedee5's data folder. Settings and saved games are also kept in the title's own storage.\n", f);
+        fclose(f);
+        chmod(marker, 0666);
+    }
+}
+
+/* after start and after each game: the copy brought up to date (new or changed files only) */
+static void keep_backup(void)
+{
+    if (!g_keep_dir[0])
+        return;
+    int n = 0;
+    g_keep_total = 0;
+    keep_walk(g_data_dir, g_keep_dir, "", 0, &n, 0);
+    char had[1100];
+    snprintf(had, sizeof had, "%s/" KEEP_MARKER, g_keep_dir);
+    FILE *f = fopen(had, "w");
+    if (f) {
+        fprintf(f, "games=%d\n", count_entries(g_roms_dir));
+        fclose(f);
+    }
+    if (n)
+        elogf("[host] safe copy: %d file(s) brought up to date in %s", n, g_keep_dir);
+}
+
+const char *cdie_keep_note(void)
+{
+    return g_keep_note;
+}
+
 int cdie_init(const cdie_config *cfg)
 {
     if (g_inited)
@@ -5689,6 +5931,7 @@ int cdie_init(const cdie_config *cfg)
     snprintf(g_options_dir, sizeof g_options_dir, "%s", d);
     mkdirs(g_system_dir);
     mkdirs(g_save_dir);
+    keep_restore(); /* (a replaced app folder: the safe copy's files back first) */
     {
         char lp[1200];
         snprintf(lp, sizeof lp, "%s/cdi_log.txt", g_save_dir);
@@ -5732,7 +5975,12 @@ int cdie_init(const cdie_config *cfg)
     pt_load();
     nas_cfg_load(g_options_dir);
     drives_cfg_load(g_options_dir);
+    if (g_keep_dir[0])
+        elogf("[host] safe copy of the settings and saved games: %s", g_keep_dir);
+    if (g_keep_restored)
+        elogf("[host] %d file(s) put back from the safe copy", g_keep_restored);
     roms_scan(g_roms_dir, g_covers_dir);
+    keep_backup();
     nas_start(g_save_dir); /* in the background: the NAS games appear when they have been read */
     th_start();
     cv_start();
@@ -6328,9 +6576,9 @@ static int bk_thread(void *arg)
         if (g_bk_failed)
             g_bk_state = 2;
         else {
-            snprintf(g_bk_msg, sizeof g_bk_msg, l.n ? "%d file(s) brought back from the NAS" : "no saves on the NAS yet (%s)", l.n ? g_bk_files : 0,
-                     BACKUP_DIR);
-            if (!l.n)
+            if (l.n)
+                snprintf(g_bk_msg, sizeof g_bk_msg, "%d file(s) brought back from the NAS", g_bk_files);
+            else
                 snprintf(g_bk_msg, sizeof g_bk_msg, "no saves on the NAS yet (%s)", BACKUP_DIR);
             g_bk_state = 1;
             if (g_bk_files) {
@@ -6665,6 +6913,17 @@ void cdie_covers_set(int on)
     }
 }
 
+int cdie_local_ip(char *out, size_t n)
+{
+    unsigned char me[4];
+    if (local_ipv4(me) != 0) {
+        snprintf(out, n, "%s", "");
+        return -1;
+    }
+    snprintf(out, n, "%u.%u.%u.%u", me[0], me[1], me[2], me[3]);
+    return 0;
+}
+
 void cdie_dns_get(char *out, size_t n)
 {
     char p[1200], line[128];
@@ -6751,29 +7010,6 @@ static int item_cmp(const void *a, const void *b)
 }
 
 #ifdef HAVE_NFS
-/* This console's address on the local network: a UDP socket "connected" to an outside address (nothing is sent) */
-static int local_ipv4(unsigned char out[4])
-{
-    int fd = socket(AF_INET, SOCK_DGRAM, 0);
-    if (fd < 0)
-        return -1;
-    struct sockaddr_in sa;
-    memset(&sa, 0, sizeof sa);
-    sa.sin_family = AF_INET;
-    sa.sin_port = htons(53);
-    inet_pton(AF_INET, "1.1.1.1", &sa.sin_addr);
-    int r = -1;
-    if (connect(fd, (struct sockaddr *)&sa, sizeof sa) == 0) {
-        struct sockaddr_in me;
-        socklen_t len = sizeof me;
-        if (getsockname(fd, (struct sockaddr *)&me, &len) == 0 && me.sin_addr.s_addr != 0) {
-            memcpy(out, &me.sin_addr, 4);
-            r = 0;
-        }
-    }
-    close(fd);
-    return r;
-}
 
 static void count_share(const char *share, void *user)
 {
@@ -6787,7 +7023,76 @@ static void add_share(const char *share, void *user)
     net_add(share, share, CDIE_NET_SHARE, 0);
 }
 
-/* every address of the console's /24 network, 64 at a time, on the NFS port */
+/* Asks every machine the broadcasts reach for its NFS port (the portmapper's GETPORT, over UDP): the console's
+ * own /24 is scanned anyway, but a NAS on the same network with a wider mask (10.0.0.8 beside a console at
+ * 10.0.3.21 on a /16) only answers this. Fills addrs (4 bytes each), returns how many. */
+static int bcast_find(const unsigned char me[4], unsigned char addrs[][4], int max)
+{
+    int fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (fd < 0)
+        return 0;
+    int yes = 1;
+    setsockopt(fd, SOL_SOCKET, SO_BROADCAST, &yes, sizeof yes);
+    fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
+    const uint32_t xid = 0x5ee5d000u ^ (uint32_t)(pc_ms());
+    const uint32_t call[14] = {xid, 0, 2, 100000, 2, 3, 0, 0, 0, 0, 100003, 3, 6, 0}; /* GETPORT nfs v3 tcp */
+    unsigned char pkt[56];
+    for (int i = 0; i < 14; i++) {
+        pkt[i * 4] = (unsigned char)(call[i] >> 24);
+        pkt[i * 4 + 1] = (unsigned char)(call[i] >> 16);
+        pkt[i * 4 + 2] = (unsigned char)(call[i] >> 8);
+        pkt[i * 4 + 3] = (unsigned char)call[i];
+    }
+    /* everyone on the segment, then the console's /24, /16 and /8 as directed broadcasts (harmless when wrong) */
+    const unsigned char to[4][4] = {{255, 255, 255, 255}, {me[0], me[1], me[2], 255}, {me[0], me[1], 255, 255},
+                                    {me[0], 255, 255, 255}};
+    for (int round = 0; round < 2; round++)
+        for (int t = 0; t < 4; t++) {
+            struct sockaddr_in sa;
+            memset(&sa, 0, sizeof sa);
+            sa.sin_family = AF_INET;
+            sa.sin_port = htons(111);
+            memcpy(&sa.sin_addr, to[t], 4);
+            sendto(fd, pkt, sizeof pkt, 0, (struct sockaddr *)&sa, sizeof sa);
+        }
+    int n = 0;
+    const double until = pc_ms() + 1500.0;
+    while (n < max && !g_net.cancel) {
+        const int wait = (int)(until - pc_ms());
+        if (wait <= 0)
+            break;
+        struct pollfd pf = {fd, POLLIN, 0};
+        if (poll(&pf, 1, wait) <= 0)
+            break;
+        unsigned char r[256];
+        struct sockaddr_in from;
+        socklen_t fl = sizeof from;
+        const ssize_t got = recvfrom(fd, r, sizeof r, 0, (struct sockaddr *)&from, &fl);
+        if (got < 24)
+            continue;
+#define U32(o) ((uint32_t)r[o] << 24 | (uint32_t)r[(o) + 1] << 16 | (uint32_t)r[(o) + 2] << 8 | r[(o) + 3])
+        /* a reply to our call, accepted (any port: a NAS with only NFS 4 still runs the portmapper) */
+        if (U32(0) != xid || U32(4) != 1 || U32(8) != 0)
+            continue;
+        const uint32_t vlen = U32(16);
+        if (vlen > 400 || 20 + ((vlen + 3) & ~3u) + 4 > (uint32_t)got || U32(20 + ((vlen + 3) & ~3u)) != 0)
+            continue;
+#undef U32
+        unsigned char a[4];
+        memcpy(a, &from.sin_addr, 4);
+        if (!memcmp(a, me, 4))
+            continue;
+        int dup = 0;
+        for (int i = 0; i < n; i++)
+            dup |= !memcmp(addrs[i], a, 4);
+        if (!dup)
+            memcpy(addrs[n++], a, 4);
+    }
+    close(fd);
+    return n;
+}
+
+/* every address of the console's /24 network, 64 at a time, on the NFS port; and a broadcast for the rest */
 static void net_find(void)
 {
     unsigned char me[4];
@@ -6803,6 +7108,10 @@ static void net_find(void)
     }
     int found[256] = {0}, nfound = 0;
     g_net.total = 254;
+    net_say("Asking the network for NFS servers ...");
+    unsigned char bc[32][4];
+    const int nbc = bcast_find(me, bc, 32);
+    elogf("[host] NAS search from %u.%u.%u.%u: %d answer(s) to the broadcast", me[0], me[1], me[2], me[3], nbc);
     for (int base = 1; base <= 254 && !g_net.cancel; base += 64) {
         int fds[64], hosts[64], n = 0;
         net_say("Looking for NFS servers on %u.%u.%u.x ... (%d of 254)", me[0], me[1], me[2], base - 1);
@@ -6873,9 +7182,28 @@ static void net_find(void)
         net_say("Stopped");
         return;
     }
-    for (int i = 0; i < nfound && !g_net.cancel; i++) {
+    /* the broadcast's answers outside the /24 just scanned, when their NFS port opens */
+    unsigned char other[32][4];
+    int nother = 0;
+    for (int i = 0; i < nbc && !g_net.cancel; i++) {
+        if (!memcmp(bc[i], me, 3))
+            continue; /* (the scan has those) */
         char ip[32], why[200];
-        snprintf(ip, sizeof ip, "%u.%u.%u.%d", me[0], me[1], me[2], found[i]);
+        snprintf(ip, sizeof ip, "%u.%u.%u.%u", bc[i][0], bc[i][1], bc[i][2], bc[i][3]);
+        net_say("Checking %s ...", ip);
+        if (nfsx_probe(ip, 2049, 1500, why, sizeof why) == 0)
+            memcpy(other[nother++], bc[i], 4);
+        else
+            elogf("[host] NAS search: %s answered the broadcast but not on the NFS port (%s)", ip, why);
+    }
+    const int total_found = nfound + nother;
+    for (int i = 0; i < total_found && !g_net.cancel; i++) {
+        char ip[32], why[200];
+        if (i < nfound)
+            snprintf(ip, sizeof ip, "%u.%u.%u.%d", me[0], me[1], me[2], found[i]);
+        else
+            snprintf(ip, sizeof ip, "%u.%u.%u.%u", other[i - nfound][0], other[i - nfound][1], other[i - nfound][2],
+                     other[i - nfound][3]);
         net_say("Found %s, asking for its shares ...", ip);
         int shares = 0;
         if (nfsx_exports(ip, 3, count_share, &shares, why, sizeof why) < 0)
@@ -6885,10 +7213,11 @@ static void net_find(void)
     pl_lock(g_net_job_mtx);
     qsort(g_net.items, (size_t)g_net.nitems, sizeof *g_net.items, item_cmp);
     pl_unlock(g_net_job_mtx);
-    if (!nfound)
-        net_say("No NFS server answered on %u.%u.%u.x (is NFS switched on, on the NAS?)", me[0], me[1], me[2]);
+    if (!total_found)
+        net_say("No NFS server found from %u.%u.%u.%u. Is NFS on, on the NAS? On another network? Enter its address",
+                me[0], me[1], me[2], me[3]);
     else
-        net_say("%d NFS server(s) found on %u.%u.%u.x", nfound, me[0], me[1], me[2]);
+        net_say("%d NFS server(s) found", total_found);
     g_net.state = 1;
 }
 

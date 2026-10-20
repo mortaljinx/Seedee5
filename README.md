@@ -54,15 +54,22 @@ No games, BIOS or keys are included. You need your own.
 
 ## Install
 
-1. Download `Seedee5-1.21.zip` from the Releases page and unzip it. It holds one folder, `PPSA99142`.
+1. Download `Seedee5-1.22.zip` from the Releases page and unzip it. It holds one folder, `PPSA99142`.
 2. Copy that folder over FTP to `/data/homebrew/` on the console.
 3. Start **Seedee5** from the home screen. On its first start it makes its folders and opens Settings.
 4. Put `cdimono1.zip` in `data/system/same_cdi/bios/`, or let *Settings → CD-i BIOS* find it on your NAS.
 5. Put games in `data/roms/`, or set up *Settings → NAS → Find NAS on my network*.
 
-Everything Seedee5 keeps is in `/data/homebrew/PPSA99142/data/` (over FTP). To update, copy the new
+Everything Seedee5 keeps is in `/data/homebrew/PPSA99142/data/` (over FTP). To update by hand, copy the new
 `PPSA99142` folder over the old one; your games, saves and settings in `data/` stay. The full guide, with the
 controls, is in [INSTALL.txt](title/INSTALL.txt), which also comes in the release zip.
+
+**Updating with ProsperoStore:** the store replaces the whole app folder and moves the old one, with your
+`data/` in it, to `/data/prosperostore/previous/PPSA99142/` (kept until the next update). From 1.22, Seedee5
+also keeps your settings, NAS settings, saved games and BIOS in the title's own storage and puts them back by
+itself after such an update. Games you copied onto the console, covers and save states are not kept that way:
+copy `roms/` (and `covers/`, `saves/states/` if you want them) back from the previous folder over FTP, before
+the next update replaces it. Games on a NAS need nothing.
 
 ## Controls
 
@@ -84,7 +91,7 @@ python3 title/make_cdi_title.py ~/ps5/Seedee5 --update   # after pulling changes
 scripts/build_title_libs.sh ~/ps5/Seedee5
 cd ~/ps5/Seedee5 && ps5/tools/build.sh
 # the release zip, source archives, notices and checksums
-python3 scripts/make_release.py ~/ps5/Seedee5 1.21 --with-core-source
+python3 scripts/make_release.py ~/ps5/Seedee5 1.22 --with-core-source
 ```
 
 `make` in this folder builds the desktop versions (`cdihost`, and `cdie_sdl`, the same engine with SDL) for testing

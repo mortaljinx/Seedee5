@@ -218,6 +218,19 @@ Tests: `tools/gameinfo_test.c` (the parsing, with a fuzz pass; build it with ASa
     python3 tools/fake_wikipedia.py /tmp/fakewiki &
     CDIHOST_TEST_URLMAP='https://en.wikipedia.org/|https://127.0.0.1:8443/' ./extras_test /tmp/extras-cache
 
+## Surviving a replaced app folder (1.22)
+
+ProsperoStore updates an app by replacing its folder (/data/homebrew/PPSA99142) and moving the old one to
+/data/prosperostore/previous/PPSA99142, so the data folder inside it goes too. The engine ("a safe copy of what
+matters") keeps the data folder's own settings files, saves/ (not saves/states) and system/ in /download0/seedee5,
+the title's own storage, which belongs to the title ID and survives a replaced folder (under 180 MiB in all;
+param.json's downloadDataSize is 256 MiB). The copy is brought up to date at start and after each game.
+
+The data folder holds a marker (.seedee5-data). At start, a data folder without it and a copy with one is a
+replaced folder: missing files come back from the copy (never replacing one), and cdie_keep_note() says so for
+the wheel, with where the games went. A data folder with the marker is never restored into, so a file the user
+deletes stays deleted. Test: `make keep_test && ./keep_test <empty dir>`.
+
 ## Digital video (FMV) games
 
 Some games (Mad Dog McCree, Caesars World of Boxing, The 7th Guest...) need the CD-i

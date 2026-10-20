@@ -664,6 +664,10 @@ public:
 			engineError = cdie_last_error();
 			std::cerr << "CDI: the engine could not start: " << engineError << std::endl;
 		}
+		if (engineOk && cdie_keep_note()[0]) {
+			cdi::library().keepNote = cdie_keep_note();
+			logLine((std::string("CDI: ") + cdie_keep_note()).c_str());
+		}
 		loadFavourites();
 		info.load(dataPath("games_info.txt"));
 		controls.load(dataPath("saves/controls.txt"));

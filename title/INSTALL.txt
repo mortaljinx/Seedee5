@@ -1,4 +1,4 @@
-Seedee5 1.21 - a Philips CD-i emulator for the PS5
+Seedee5 1.22 - a Philips CD-i emulator for the PS5
 =================================================
 
 Seedee5 plays Philips CD-i discs (as .chd, .cue/.bin, .iso or .7z files) on a jailbroken PS5 that runs
@@ -33,6 +33,10 @@ On its first start it makes its folders and opens Settings:
    folder with the games. Games on a NAS are copied to the console when you start them.
 
 Updating: copy the new PPSA99142 folder over the old one. Everything in data/ stays.
+Updating with ProsperoStore: the store replaces the whole folder and moves the old one, data/ included, to
+/data/prosperostore/previous/PPSA99142/ until the next update. From 1.22 your settings, NAS settings, saved games
+and BIOS come back by themselves (Seedee5 keeps a copy in the title's own storage); copy roms/ (and covers/,
+saves/states/ if you want them) back from that folder over FTP before updating again.
 Do NOT delete the PPSA99142 folder to update: data/ (your saves) is inside it. Back it up first, or turn on
 Settings > NAS > Back up saves to the NAS.
 

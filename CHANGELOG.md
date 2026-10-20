@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.22 (2026-10-20)
+
+- **Updating no longer loses your settings and saved games.** ProsperoStore updates an app by replacing its
+  whole folder (the old one, with your files, goes to `/data/prosperostore/previous/PPSA99142`), and everything
+  Seedee5 keeps was inside it. Seedee5 now also keeps your settings, NAS settings, saved games and BIOS in the
+  title's own storage (`/download0`), which an update doesn't touch, and puts them back by itself when it finds
+  its folder replaced. Games on the console, covers and save states are too big for that storage: the wheel then
+  says where they are, to copy back over FTP. (Updating from 1.21 or older, the wheel says where the old data
+  folder went, as nothing was kept yet.)
+- **Finding a NAS on another subnet.** *Find NAS on my network* only tried the console's own /24 (10.0.3.x for a
+  console at 10.0.3.21), so a NAS at 10.0.0.8 on the same network with a wider mask was never found. It now also
+  asks the whole network by broadcast. A NAS behind a router on a separate network still can't be found that way:
+  *Enter the address* takes it, and now starts from the console's own network instead of 192.168.1.1.
+- Cover and game-info downloads ask the router of the console's own network for names (x.y.z.1), not
+  192.168.1.1, before 1.1.1.1 and 8.8.8.8.
+- A message about NAS save backups could crash the app when the NAS held no saves yet.
+
 ## 1.21 (2026-10-17)
 
 - **New logo:** the S5 icon on the PS5 home screen, at the top left of the wheel and in the README.

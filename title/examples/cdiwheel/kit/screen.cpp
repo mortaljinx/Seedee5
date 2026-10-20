@@ -806,8 +806,12 @@ class CoverFlow final : public app::Concept
         if (lib.logo)
             list.image(lib.logo, Rect{48.0f, 32.0f - 10.0f * (1.0f - in), 128.0f, 128.0f}, gfx::kFullUv,
                        {1.0f, 1.0f, 1.0f, in}, 24.0f);
-        // What is still on its way: the NAS, then the covers, one small line each
+        // What is still on its way: the NAS, then the covers, one small line each; first, after an app folder
+        // was replaced by an update, what came back and where the rest is (two lines, until the app closes)
         float y = kHeaderY + 34.0f;
+        if (!lib.keepNote.empty())
+            y = ui::paragraph(list, fonts.semibold, lib.keepNote, kCentreX, y, 20, 1400, 28, kWarn.with_alpha(in), 2,
+                              gfx::Align::center) + 6.0f;
         if (!lib.nas.empty())
         {
             const Color c = lib.nasState == 3 ? kWarn : lib.nasState == 2 ? kGood : kWhite.with_alpha(0.55f);

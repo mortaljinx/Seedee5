@@ -162,7 +162,7 @@ def patch_cmake(title):
 
 
 APP_NAME = "Seedee5"
-APP_VERSION = "1.22"  # keep in step with SEEDEE5_VERSION in ps5/src/cdi/cdi_library.hpp
+APP_VERSION = "1.23"  # keep in step with SEEDEE5_VERSION in ps5/src/cdi/cdi_library.hpp
 
 
 def set_param(title):

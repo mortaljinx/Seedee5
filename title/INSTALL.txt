@@ -1,4 +1,4 @@
-Seedee5 1.22 - a Philips CD-i emulator for the PS5
+Seedee5 1.23 - a Philips CD-i emulator for the PS5
 =================================================
 
 Seedee5 plays Philips CD-i discs (as .chd, .cue/.bin, .iso or .7z files) on a jailbroken PS5 that runs

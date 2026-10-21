@@ -7365,7 +7365,7 @@ static int net_job(void *arg)
         net_say("Asking %s for its shares ...", g_net.ip);
         const int r = nfsx_exports(g_net.ip, 5, add_share, NULL, why, sizeof why);
         if (r < 0) {
-            net_say("%s", why);
+            net_say("%s. Type the share path instead (as the NAS names it, such as /volume1/games)", why);
             g_net.state = 2;
         } else {
             pl_lock(g_net_job_mtx);
@@ -7374,7 +7374,7 @@ static int net_job(void *arg)
             if (r)
                 net_say("%d share(s) on %s", r, g_net.ip);
             else
-                net_say("%s offers no shares to this console", g_net.ip);
+                net_say("%s lists no shares (NFS 4 only, or listing turned off?): type the share path instead", g_net.ip);
             g_net.state = 1;
         }
         break;
@@ -7385,38 +7385,93 @@ static int net_job(void *arg)
     default: g_net.state = 2; break;
     }
 #else
+    if (g_net.what == 99) { /* tests only (desktop builds): a slow job that stops when asked */
+        for (int i = 0; i < 300 && !g_net.cancel; i++) {
+            net_say("test job %s: %d", g_net.ip, i);
+            pl_delay(10);
+        }
+        net_say(g_net.cancel ? "test job %s: stopped" : "test job %s: done", g_net.ip);
+        g_net.state = g_net.cancel ? 2 : 1;
+        return 0;
+    }
     net_say("This build has no NAS support");
     g_net.state = 2;
 #endif
     return 0;
 }
 
+/* A job asked for while another runs stops that one: the new job's thread waits for it to end, then takes over
+ * (a NAS address entered while "Find NAS" is still scanning used to be refused, so its shares never came). Each
+ * request carries its own copy of what it asks; when several come quickly, each waits for the one before, and
+ * only the newest runs. Until it has started, cdie_net_poll reports it as working. */
+typedef struct {
+    int what;
+    unsigned gen;
+    char ip[64], share[512], path[1024];
+    pl_thread *prev;
+} net_request;
+static volatile unsigned g_net_gen;
+static volatile int g_net_starting, g_net_next_cancelled;
+
+static int net_job(void *arg);
+static int net_job_after(void *arg)
+{
+    net_request *q = arg;
+    if (q->prev)
+        pl_thread_wait(q->prev); /* (each thread is waited for by exactly one: the request after it) */
+    pl_lock(g_net_job_mtx);
+    if (q->gen != g_net_gen) { /* a newer request came: it runs, this one does not */
+        pl_unlock(g_net_job_mtx);
+        free(q);
+        return 0;
+    }
+    g_net.nitems = 0;
+    g_net.what = q->what;
+    g_net.cancel = g_net_next_cancelled; /* (stopped already while it waited: it ends at once) */
+    g_net.done = g_net.total = 0;
+    snprintf(g_net.ip, sizeof g_net.ip, "%s", q->ip);
+    snprintf(g_net.share, sizeof g_net.share, "%s", q->share);
+    snprintf(g_net.path, sizeof g_net.path, "%s", q->path);
+    g_net.msg[0] = 0;
+    g_net.state = 0;
+    g_net_starting = 0;
+    pl_unlock(g_net_job_mtx);
+    free(q);
+    return net_job(NULL);
+}
+
 int cdie_net_start(int what, const char *ip, const char *share, const char *path)
 {
     if (!g_net_job_mtx)
         g_net_job_mtx = pl_mutex_create();
-    if (g_net.thread) {
-        if (g_net.state == 0)
-            return -1; /* one at a time */
-        pl_thread_wait(g_net.thread);
-        g_net.thread = NULL;
-    }
+    net_request *q = calloc(1, sizeof *q);
+    if (!q)
+        return -1;
+    q->what = what;
+    snprintf(q->ip, sizeof q->ip, "%s", ip ? ip : "");
+    snprintf(q->share, sizeof q->share, "%s", share ? share : "");
+    snprintf(q->path, sizeof q->path, "%s", path ? path : "");
     pl_lock(g_net_job_mtx);
+    q->prev = g_net.thread; /* running or waiting: this request waits for it (and it is told to stop) */
+    g_net.thread = NULL;
+    g_net.cancel = 1;
+    q->gen = ++g_net_gen;
+    g_net_next_cancelled = 0;
+    g_net_starting = 1;
     g_net.nitems = 0;
-    g_net.what = what;
-    g_net.cancel = 0;
-    g_net.done = g_net.total = 0;
-    snprintf(g_net.ip, sizeof g_net.ip, "%s", ip ? ip : "");
-    snprintf(g_net.share, sizeof g_net.share, "%s", share ? share : "");
-    snprintf(g_net.path, sizeof g_net.path, "%s", path ? path : "");
-    g_net.msg[0] = 0;
-    g_net.state = 0;
     pl_unlock(g_net_job_mtx);
-    g_net.thread = pl_thread_create(net_job, "settings-net", NULL);
-    if (!g_net.thread) {
+    if (!q->prev)
+        g_net.cancel = 0;
+    pl_thread *t = pl_thread_create(net_job_after, "settings-net", q);
+    if (!t) {
+        if (q->prev)
+            pl_thread_wait(q->prev);
+        free(q);
+        g_net_starting = 0;
         g_net.state = 2;
         return -1;
     }
+    g_net.thread = t;
     return 0;
 }
 
@@ -7425,14 +7480,15 @@ int cdie_net_poll(char *msg, size_t n, uint64_t *done, uint64_t *total)
     if (!g_net_job_mtx)
         return -1;
     pl_lock(g_net_job_mtx);
+    const int starting = g_net_starting;
     if (msg && n)
-        snprintf(msg, n, "%s", g_net.msg);
+        snprintf(msg, n, "%s", starting ? "Stopping the last search ..." : g_net.msg);
     pl_unlock(g_net_job_mtx);
     if (done)
-        *done = g_net.done;
+        *done = starting ? 0 : g_net.done;
     if (total)
-        *total = g_net.total;
-    return g_net.state;
+        *total = starting ? 0 : g_net.total;
+    return starting ? 0 : g_net.state;
 }
 
 int cdie_net_items(cdie_net_item *out, int max)
@@ -7440,7 +7496,7 @@ int cdie_net_items(cdie_net_item *out, int max)
     if (!g_net_job_mtx)
         return 0;
     pl_lock(g_net_job_mtx);
-    const int n = g_net.nitems < max ? g_net.nitems : max;
+    const int n = g_net_starting ? 0 : g_net.nitems < max ? g_net.nitems : max; /* (none of the stopped job's) */
     if (n > 0)
         memcpy(out, g_net.items, (size_t)n * sizeof *out);
     pl_unlock(g_net_job_mtx);
@@ -7450,6 +7506,8 @@ int cdie_net_items(cdie_net_item *out, int max)
 void cdie_net_cancel(void)
 {
     g_net.cancel = 1;
+    if (g_net_starting)
+        g_net_next_cancelled = 1;
 }
 
 static void net_stop(void)

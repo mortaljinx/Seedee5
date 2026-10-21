@@ -63,6 +63,9 @@ extras_test: tools/extras_test.c $(ENGINE_SRC) engine/cdie.h host/cdi_extras.h h
 keep_test: tools/keep_test.c $(ENGINE_SRC) engine/cdie.h build/libbearssl.a build/liblzma7z.a
 	$(CC) $(CFLAGS) -fsanitize=address,undefined $(NFS_CFLAGS) $(LZMA_FLAGS) -Iengine -Ihost -Iinclude -I$(BEAR_DIR)/inc -o $@ tools/keep_test.c $(filter-out engine/cdi_engine.c,$(ENGINE_SRC)) build/liblzma7z.a build/libbearssl.a $(NFS_LIBS) -ldl -lpthread
 
+net_job_test: tools/net_job_test.c $(ENGINE_SRC) engine/cdie.h build/libbearssl.a build/liblzma7z.a
+	$(CC) $(CFLAGS) -fsanitize=address,undefined $(LZMA_FLAGS) -Iengine -Ihost -Iinclude -I$(BEAR_DIR)/inc -o $@ tools/net_job_test.c $(filter-out engine/cdi_engine.c,$(ENGINE_SRC)) build/liblzma7z.a build/libbearssl.a -ldl -lpthread
+
 testcore.so: tools/testcore.c include/libretro.h
 	$(CC) $(CFLAGS) -fPIC -shared -Iinclude -o $@ tools/testcore.c -lm
 

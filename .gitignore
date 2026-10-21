@@ -45,3 +45,4 @@ gameinfo_test
 *.tar.gz
 *.zip
 keep_test
+net_job_test

@@ -16,6 +16,11 @@
 - Cover and game-info downloads ask the router of the console's own network for names (x.y.z.1), not
   192.168.1.1, before 1.1.1.1 and 8.8.8.8.
 - A message about NAS save backups could crash the app when the NAS held no saves yet.
+- **Entering a NAS address during a search.** The NAS settings ran one network job at a time and refused the
+  next while one was busy: an address entered while *Find NAS* was still searching never asked for its shares,
+  and the old search's progress stayed on screen. A new job now stops the running one and takes over.
+- **Type the share path.** A NAS that doesn't list its shares (NFS 4 only, or listing turned off) can now be
+  opened by typing the share's path, such as `/volume1/games`, on the on-screen keyboard (Shares page).
 
 ## 1.21 (2026-10-17)
 

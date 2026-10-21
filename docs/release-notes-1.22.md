@@ -10,6 +10,8 @@ ProsperoStore updates an app by replacing its whole folder, and everything Seede
 ### Also fixed
 
 - **NAS on another subnet:** *Find NAS on my network* only searched the console's own 10.0.3.x (or 192.168.1.x...). It now asks the whole network too, so a NAS at 10.0.0.8 next to a console at 10.0.3.21 is found. A NAS on a separate, routed network can still be entered by hand (*Settings › NAS › Enter the address*), which now starts from your own network's address.
+- **Entering a NAS address while it was still searching** did nothing: the request was refused and the old search's progress stayed on screen. A new request now stops the search and takes over.
+- **Type the share path:** a NAS that doesn't list its shares (NFS 4 only, or listing turned off) can be opened by typing the share's path on the Shares page, such as `/volume1/games`.
 - Downloads look up names through your own network's router, not always 192.168.1.1.
 - A rare crash in the NAS save backup message.
 

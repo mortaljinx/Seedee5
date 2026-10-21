@@ -60,6 +60,10 @@ public:
 			updateIp(input, feedback);
 			return;
 		}
+		if (p.kind == Page::sharepath) {
+			updateSharePath(input, feedback);
+			return;
+		}
 		rebuild();
 		const int n = static_cast<int>(rows.size());
 		if (input.is_pressed(hui::Action::back) || input.is_pressed(hui::Action::menu)) {
@@ -115,6 +119,8 @@ public:
 		}
 		if (p.kind == Page::ip) {
 			drawIp(list, fonts, r, y + 40.0f);
+		} else if (p.kind == Page::sharepath) {
+			drawSharePath(list, fonts, r, y + 30.0f);
 		} else {
 			y += 30.0f;
 			const float rowH = 54.0f;
@@ -155,6 +161,11 @@ public:
 			const hui::ui::Hint hints[] = { { hui::ui::Button::dpad, "Digit" }, { hui::ui::Button::l1, "Step 10", hui::ui::Button::r1 },
 				{ hui::ui::Button::cross, "OK" }, { hui::ui::Button::circle, "Back" }, { hui::ui::Button::square, ipAutoLabel() } };
 			hui::ui::draw_hints(list, fonts, hui::ui::GlyphStyle::dark(), hints, ipAllowsAuto() ? 5 : 4, 1824, true);
+		} else if (p.kind == Page::sharepath) {
+			const hui::ui::Hint hints[] = { { hui::ui::Button::cross, "Type" }, { hui::ui::Button::square, "Delete" },
+				{ hui::ui::Button::triangle, "Space" }, { hui::ui::Button::l2, "Shift" }, { hui::ui::Button::r2, "Symbols" },
+				{ hui::ui::Button::circle, "Back" } };
+			hui::ui::draw_hints(list, fonts, hui::ui::GlyphStyle::dark(), hints, 6, 1824, true);
 		} else {
 			const hui::ui::Hint hints[] = { { hui::ui::Button::cross, "Choose" }, { hui::ui::Button::dpad, "Change" },
 				{ hui::ui::Button::circle, stack.size() > 1 ? "Back" : "Close" } };
@@ -164,12 +175,12 @@ public:
 
 private:
 	struct Page {
-		enum Kind { main, nas, servers, shares, folders, ip, bios, biosfind, games, controls } kind;
+		enum Kind { main, nas, servers, shares, folders, ip, bios, biosfind, games, controls, sharepath } kind;
 		int sel{ 0 };
 		std::string path; // folders: the folder shown
 	};
 	enum Id { idBios, idNas, idGames, idCovers, idCoversRetry, idDns, idRescan, idClose, idNasOn, idFind, idEnter, idServer, idShare,
-		idFolder, idVersion, idReserved, idCache, idSave, idItem, idUseFolder, idUp, idBiosFind, idBiosCheck, idEnterInstead, idControls, idFace0, idFace1, idFace2, idFace3, idSecond, idBackup, idBackupNow, idRestore, idAbout };
+		idFolder, idVersion, idReserved, idCache, idSave, idItem, idUseFolder, idUp, idBiosFind, idBiosCheck, idEnterInstead, idControls, idFace0, idFace1, idFace2, idFace3, idSecond, idBackup, idBackupNow, idRestore, idAbout, idTypeShare };
 	struct Row {
 		Id id;
 		std::string label, value;
@@ -289,6 +300,7 @@ private:
 		case Page::shares: return "Shares";
 		case Page::folders: return "Pick the folder with your games";
 		case Page::ip: return "Address";
+		case Page::sharepath: return "Share path";
 		case Page::bios: return "CD-i BIOS";
 		case Page::biosfind: return "Find the BIOS on the NAS";
 		case Page::games: return "Games on this console";
@@ -330,6 +342,9 @@ private:
 			break;
 		case Page::folders:
 			out.push_back(std::string(draft.server) + ":" + draft.share + (p.path.empty() ? "" : "/" + p.path));
+			break;
+		case Page::sharepath:
+			out.push_back(std::string("The share on ") + draft.server + " as the NAS names it (its export path), such as /volume1/games or /mnt/user/roms. The folder with the games is picked next.");
 			break;
 		case Page::ip:
 			out.push_back(ipForDns ? "The DNS server to ask for the cover servers' addresses (your router does it when this is automatic)."
@@ -420,6 +435,10 @@ private:
 					rows.push_back({ idItem, items[i].name, "", false, true, static_cast<int>(i) });
 				}
 			}
+			// a NAS that does not list its shares (NFS 4 only, or listing turned off) still opens one by its path
+			rows.push_back({ idTypeShare, "Type the share path", draft.share[0] ? draft.share : "" });
+			break;
+		case Page::sharepath:
 			break;
 		case Page::folders: {
 			const bool listed = jobState == 1 && jobWhat == CDIE_NET_FOLDER;
@@ -643,6 +662,9 @@ private:
 			}
 			break;
 		}
+		case idTypeShare:
+			openSharePath();
+			break;
 		case idBiosFind:
 			push(Page::biosfind);
 			startJob(CDIE_NET_BIOS_FIND, draft.server, draft.share, "");
@@ -663,6 +685,85 @@ private:
 		}
 		push(Page::folders, path);
 		startJob(CDIE_NET_FOLDER, draft.server, draft.share, path.c_str());
+	}
+
+	// ---- the share path: typed on the kit's on-screen keyboard ----
+
+	hui::ui::Keyboard keys;
+	std::string typed;
+
+	static hui::ui::KeyboardLayout pathLayout()
+	{
+		using K = hui::ui::KeyKind;
+		hui::ui::KeyboardLayout l;
+		l.name = "abc";
+		l.columns = 10;
+		l.add_row("1234567890");
+		l.add_row("qwertyuiop");
+		l.add_row("asdfghjkl/");
+		l.add_row("zxcvbnm-_.");
+		l.add_row(std::vector<hui::ui::KeyboardKey>{ { K::shift, "", "", 2, "" }, { K::layout, "", "", 1, "" },
+			{ K::space, "", "", 3, "" }, { K::backspace, "", "", 2, "" }, { K::done, "", "", 2, "" } });
+		return l;
+	}
+
+	void openSharePath()
+	{
+		typed = draft.share[0] ? draft.share : "/";
+		keys = hui::ui::Keyboard();
+		keys.set_layouts({ pathLayout(), hui::ui::KeyboardLayout::symbols() });
+		keys.style.bindings = hui::ui::KeyboardBindings::standard();
+		keys.style.max_length = 200;
+		keys.style.done_label = "Open";
+		keys.on_text = [this](std::string_view t) { typed += t; };
+		keys.on_backspace = [this] {
+			if (!typed.empty()) {
+				typed.pop_back();
+			}
+		};
+		keys.set_length(static_cast<int>(typed.size()));
+		keys.set_bounds({ 360.0f, 470.0f, 1200.0f, 400.0f }); // (drawSharePath places it exactly)
+		push(Page::sharepath);
+	}
+
+	void updateSharePath(const hui::InputFrame &input, hui::ui::Feedback &feedback)
+	{
+		const hui::ui::Event e = keys.handle(input, feedback);
+		keys.update(1.0f / 60.0f);
+		if (e == hui::ui::Event::cancelled || input.is_pressed(hui::Action::menu)) {
+			pop();
+			return;
+		}
+		if (e != hui::ui::Event::activated) {
+			return;
+		}
+		std::string path = typed;
+		while (!path.empty() && (path.back() == '/' || path.back() == ' ') && path.size() > 1) {
+			path.pop_back();
+		}
+		if (path.empty() || path == "/") {
+			say("Type the share's path first, such as /volume1/games", true);
+			return;
+		}
+		if (path[0] != '/') {
+			path.insert(path.begin(), '/');
+		}
+		std::snprintf(draft.share, sizeof draft.share, "%s", path.c_str());
+		draft.path[0] = 0;
+		stack.pop_back(); // (the shares page under it goes too: openFolder replaces it)
+		openFolder("");
+	}
+
+	void drawSharePath(hui::gfx::DrawList &list, const hui::ui::Fonts &fonts, const hui::gfx::Rect &r, float y)
+	{
+		const hui::gfx::Rect field{ r.x + 48.0f, y, r.w - 96.0f, 72.0f };
+		list.rounded_rect(field, 18.0f, hui::gfx::Color{ 1, 1, 1, 0.08f });
+		list.bordered_rect(field, 18.0f, hui::gfx::Color{ 0, 0, 0, 0 }, 1.5f, hui::gfx::Color{ 0.55f, 0.75f, 1.0f, 0.8f });
+		const std::string shown = fonts.regular.font->fit(typed + "|", 30, field.w - 48.0f);
+		hui::ui::text(list, fonts.regular, shown, field.x + 24.0f, field.y + 47.0f, 30, hui::gfx::Color{ 1, 1, 1, 1 });
+		keys.set_bounds({ r.x + 60.0f, y + 100.0f, r.w - 120.0f, 400.0f });
+		hui::ui::Canvas canvas{ list, fonts };
+		keys.draw(canvas);
 	}
 
 	// ---- the address entry: four numbers, no keyboard ----
